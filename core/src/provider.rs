@@ -50,6 +50,17 @@ pub struct TurnRequest {
     pub cwd: Option<PathBuf>,
     /// Por dónde llegan las respuestas del usuario a permisos y preguntas. Sin esto, se rechazan.
     pub interactions: Option<Interactions>,
+    /// Sesión del CLI de este chat que se puede continuar. Si falla (ya no existe o no cabe más),
+    /// el adaptador empieza una nueva con `history`.
+    pub resume: Option<Resume>,
+}
+
+/// Una sesión del CLI que ya conoce la conversación hasta cierto punto.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resume {
+    pub session_id: String,
+    /// Lo ocurrido en el chat desde el último turno de esa sesión (lo que otra IA escribió, por ejemplo).
+    pub missed: Vec<ChatMessage>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +83,11 @@ pub trait Provider: Send + Sync {
         true
     }
 
+    /// La IA guarda sesiones que CoModel puede continuar en el turno siguiente.
+    fn resumable(&self) -> bool {
+        false
+    }
+
     /// El adaptador recibe adjuntos estructurados en vez de texto pegado.
     fn native_attachments(&self) -> bool { false }
 
@@ -86,14 +102,19 @@ pub trait Provider: Send + Sync {
 
 /// Convierte el historial + prompt en un único texto, para proveedores sin sesión.
 pub fn fold_history(req: &TurnRequest) -> String {
-    if req.history.is_empty() {
-        return req.prompt.clone();
+    fold_messages(&req.history, &req.prompt)
+}
+
+/// Como `fold_history`, con los mensajes que se indiquen.
+pub fn fold_messages(history: &[ChatMessage], prompt: &str) -> String {
+    if history.is_empty() {
+        return prompt.to_string();
     }
     let mut out = String::from("## Conversación previa\n");
-    for m in &req.history {
+    for m in history {
         out.push_str(&format!("[{}] {}\n", m.role.as_str(), m.content));
     }
     out.push_str("\n## Mensaje actual\n");
-    out.push_str(&req.prompt);
+    out.push_str(prompt);
     out
 }

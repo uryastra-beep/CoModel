@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { canvas, centerOn, removeCard } from "./canvas.svelte";
+  import { canvas, centerOn, here, removeCard } from "./canvas.svelte";
+  import { spaceName } from "./spaces";
   import Curtain from "./Curtain.svelte";
   import Icon from "./Icon.svelte";
   import { projectById, projects } from "./projects.svelte";
@@ -21,7 +22,8 @@
     if (!connections.loaded) refreshConnections();
   });
 
-  const chatCards = $derived(canvas.cards.filter((c) => c.kind === "chat"));
+  const chatCards = $derived(here().filter((c) => c.kind === "chat"));
+  const spaceTitle = $derived(spaceName(canvas.space));
   const collapsed = $derived(ui.sidebarCollapsed);
 
   // La sección de relevo se pliega; se recuerda la elección.
@@ -86,7 +88,7 @@
       <Icon name="home" size="1.05rem" /><span class="lbl">Inicio</span>
     </button>
     <button class="nav" aria-current={!onHome && ui.view !== "settings" ? "page" : undefined} onclick={showCanvas} title="Lienzo">
-      <Icon name="canvas" size="1.05rem" /><span class="lbl">Lienzo</span>
+      <Icon name="canvas" size="1.05rem" /><span class="lbl">Lienzo{#if canvas.space !== "general"}: {spaceTitle}{/if}</span>
       {#if chatCards.length && !collapsed}<span class="count">{chatCards.length}</span>{/if}
     </button>
     {#if collapsed}
@@ -115,7 +117,7 @@
           <ProjectsPanel />
         {:else if chatCards.length === 0}
           <div class="empty">
-            <p>Todavía no hay chats.</p>
+            <p>{canvas.space === "general" ? "Todavía no hay chats." : `Todavía no hay chats en ${spaceTitle}.`}</p>
             <button class="btn sm" onclick={() => startChat("", null)}><Icon name="plus" size="0.9rem" />Nuevo chat</button>
             <button class="link imp" onclick={() => (ui.importOpen = true)}>Importar un chat</button>
           </div>

@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::events::{AskQuestion, ProviderEvent};
 use crate::interactions::Answer;
-use crate::provider::{fold_history, Provider, ProviderError, TurnRequest};
+use crate::provider::{fold_history, fold_messages, Provider, ProviderError, TurnRequest};
 
 const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
@@ -43,11 +43,14 @@ impl ClaudeCode {
             "--disable-slash-commands",
             "--setting-sources",
             "project",
-            "--no-session-persistence",
         ]
         .iter()
         .map(|s| s.to_string())
         .collect();
+        // Cada chat sigue en la misma sesión del CLI mientras se pueda.
+        if let Some(r) = &req.resume {
+            a.extend(["--resume".into(), r.session_id.clone()]);
+        }
         if let Some(t) = &self.tools {
             a.extend(["--tools".into(), t.clone()]);
         }
@@ -148,6 +151,14 @@ pub fn control_response(req: &ControlRequest, answer: Option<Answer>) -> String 
     .to_string()
 }
 
+/// Con sesión continuada, el CLI ya recuerda lo suyo: solo se le suma lo que pasó sin él.
+fn prompt_for(req: &TurnRequest) -> String {
+    match &req.resume {
+        Some(r) => fold_messages(&r.missed, &req.prompt),
+        None => fold_history(req),
+    }
+}
+
 /// Traduce una línea de `stream-json` a eventos normalizados.
 pub fn parse_line(line: &str) -> Vec<ProviderEvent> {
     let Ok(v) = serde_json::from_str::<Value>(line) else {
@@ -221,7 +232,10 @@ pub fn parse_line(line: &str) -> Vec<ProviderEvent> {
                 cost_usd: v["total_cost_usd"].as_f64(),
             });
             if v["is_error"].as_bool().unwrap_or(false) {
-                let text = v["result"].as_str().unwrap_or("error desconocido");
+                // Algunos errores (p. ej. una sesión que ya no existe) vienen en `errors` y no en `result`.
+                let listed = v["errors"].as_array().map(|e| e.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join("; ")).filter(|e| !e.is_empty());
+                let text = v["result"].as_str().map(String::from).or(listed).unwrap_or_else(|| "error desconocido".into());
+                let text = text.as_str();
                 let lower = text.to_lowercase();
                 let is_limit = v["api_error_status"].as_u64() == Some(429)
                     || (lower.contains("limit") && (lower.contains("usage") || lower.contains("rate") || lower.contains("reached")));
@@ -250,7 +264,58 @@ impl Provider for ClaudeCode {
         self.tools.as_deref() != Some("")
     }
 
+    fn resumable(&self) -> bool {
+        true
+    }
+
     async fn run_turn(
+        &self,
+        req: TurnRequest,
+        tx: mpsc::Sender<ProviderEvent>,
+    ) -> Result<(), ProviderError> {
+        if req.resume.is_none() {
+            return self.run_once(req, tx).await;
+        }
+        // Si la sesión ya no existe o no admite más, se empieza otra con el historial del chat.
+        // El intento fallido no llega a la interfaz.
+        let (itx, mut irx) = mpsc::channel::<ProviderEvent>(64);
+        let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = lost.clone();
+        let out = tx.clone();
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = irx.recv().await {
+                if let ProviderEvent::Error(e) = &ev {
+                    if session_lost(e) {
+                        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        continue;
+                    }
+                }
+                if flag.load(std::sync::atomic::Ordering::SeqCst) && matches!(ev, ProviderEvent::Usage { .. } | ProviderEvent::Started { .. }) {
+                    continue;
+                }
+                if out.send(ev).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let first = self.run_once(req.clone(), itx).await;
+        let _ = forward.await;
+        if lost.load(std::sync::atomic::Ordering::SeqCst) {
+            let fresh = TurnRequest { resume: None, ..req };
+            return self.run_once(fresh, tx).await;
+        }
+        first
+    }
+}
+
+/// El CLI no encontró la sesión que se le pidió continuar.
+fn session_lost(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("no conversation found") || e.contains("session") && e.contains("not found")
+}
+
+impl ClaudeCode {
+    async fn run_once(
         &self,
         req: TurnRequest,
         tx: mpsc::Sender<ProviderEvent>,
@@ -277,7 +342,7 @@ impl Provider for ClaudeCode {
                 }
             }
         });
-        let user = serde_json::json!({"type": "user", "message": {"role": "user", "content": fold_history(&req)}});
+        let user = serde_json::json!({"type": "user", "message": {"role": "user", "content": prompt_for(&req)}});
         let mut wtx = Some(wtx);
         let _ = wtx.as_ref().expect("writer").send(user.to_string());
 
@@ -355,6 +420,13 @@ mod tests {
     // Líneas reales capturadas del CLI (ver docs/PROVIDER-FINDINGS.md).
     const WRITE: &str = r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"/p/hola.txt","content":"hola"},"description":"hola.txt","permission_suggestions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}],"tool_use_id":"t1"}}"#;
     const ASK: &str = r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"¿Prefieres rojo o azul?","header":"Color","options":[{"label":"Rojo","description":"Elegir rojo"},{"label":"Azul","description":"Elegir azul"}],"multiSelect":false}]},"tool_use_id":"t2","requires_user_interaction":true}}"#;
+
+    #[test]
+    fn a_missing_session_is_reported_with_its_own_message() {
+        let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"usage":{},"errors":["No conversation found with session ID: abc"]}"#;
+        let ev = parse_line(line);
+        assert!(ev.iter().any(|e| matches!(e, ProviderEvent::Error(m) if session_lost(m))), "{ev:?}");
+    }
 
     #[test]
     fn parses_permission_and_question_requests() {

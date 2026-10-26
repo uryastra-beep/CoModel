@@ -10,7 +10,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::events::ProviderEvent;
-use crate::provider::{fold_history, Provider, ProviderError, TurnRequest};
+use crate::provider::{fold_history, fold_messages, Provider, ProviderError, TurnRequest};
 
 /// Un modelo de Codex tal como lo anuncia la cuenta del usuario.
 #[derive(Debug, Clone, serde::Serialize, PartialEq)]
@@ -127,14 +127,20 @@ impl Codex {
     fn args(&self, req: &TurnRequest) -> Vec<String> {
         let plan = matches!(req.mode.as_deref(), Some("plan"));
         let sandbox = if self.read_only || plan { "read-only" } else { "workspace-write" };
-        let mut a: Vec<String> = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-s", sandbox]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        if let Some(cwd) = &req.cwd {
-            a.push("-C".into());
-            a.push(cwd.display().to_string());
-        }
+        // Cada chat sigue en la misma sesión de Codex mientras se pueda. `exec resume` no acepta `-s` ni `-C`:
+        // el sandbox va por configuración y la carpeta es la del proceso.
+        let mut a: Vec<String> = if req.resume.is_some() {
+            let mut a: Vec<String> = ["exec", "resume", "--json", "--skip-git-repo-check", "--ignore-user-config", "-c"].iter().map(|s| s.to_string()).collect();
+            a.push(format!("sandbox_mode=\"{sandbox}\""));
+            a
+        } else {
+            let mut a: Vec<String> = ["exec", "--json", "--skip-git-repo-check", "--ignore-user-config", "-s", sandbox].iter().map(|s| s.to_string()).collect();
+            if let Some(cwd) = &req.cwd {
+                a.push("-C".into());
+                a.push(cwd.display().to_string());
+            }
+            a
+        };
         // Solo llega un modelo si Codex es la IA elegida en el chat; uno de Claude u OpenRouter nunca vale aquí.
         if let Some(m) = req.model.as_deref().filter(|m| !m.starts_with("claude") && !m.contains('/')) {
             a.push("-m".into());
@@ -143,6 +149,9 @@ impl Codex {
         if let Some(e) = req.effort.as_deref().filter(|e| matches!(*e, "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra")) {
             a.push("-c".into());
             a.push(format!("model_reasoning_effort=\"{e}\""));
+        }
+        if let Some(r) = &req.resume {
+            a.push(r.session_id.clone());
         }
         a.push("-".into()); // el mensaje llega por stdin
         a
@@ -233,7 +242,51 @@ impl Provider for Codex {
         &self.id
     }
 
+    fn resumable(&self) -> bool {
+        true
+    }
+
     async fn run_turn(&self, req: TurnRequest, tx: mpsc::Sender<ProviderEvent>) -> Result<(), ProviderError> {
+        if req.resume.is_none() {
+            return self.run_once(req, tx).await;
+        }
+        // Si la sesión ya no existe, se empieza otra con el historial del chat; el intento fallido no llega a la interfaz.
+        let (itx, mut irx) = mpsc::channel::<ProviderEvent>(64);
+        let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = lost.clone();
+        let out = tx.clone();
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = irx.recv().await {
+                let drop_it = match &ev {
+                    ProviderEvent::Error(e) | ProviderEvent::LimitReached { reason: e, .. } if session_lost(e) => {
+                        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        true
+                    }
+                    ProviderEvent::Usage { .. } | ProviderEvent::Started { .. } => flag.load(std::sync::atomic::Ordering::SeqCst),
+                    _ => false,
+                };
+                if !drop_it && out.send(ev).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let first = self.run_once(req.clone(), itx).await;
+        let _ = forward.await;
+        if lost.load(std::sync::atomic::Ordering::SeqCst) {
+            return self.run_once(TurnRequest { resume: None, ..req }, tx).await;
+        }
+        first
+    }
+}
+
+/// Codex no encontró la sesión que se le pidió continuar.
+fn session_lost(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("no session") || e.contains("session not found") || e.contains("no rollout") || e.contains("no conversation") || (e.contains("session") && e.contains("not found")) || e.contains("thread not found")
+}
+
+impl Codex {
+    async fn run_once(&self, req: TurnRequest, tx: mpsc::Sender<ProviderEvent>) -> Result<(), ProviderError> {
         let mut cmd = Command::new(&self.binary);
         cmd.args(self.args(&req)).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         if let Some(cwd) = &req.cwd {
@@ -246,7 +299,10 @@ impl Provider for Codex {
             prompt.push_str(p);
             prompt.push_str("\n\n---\n\n");
         }
-        prompt.push_str(&fold_history(&req));
+        match &req.resume {
+            Some(r) => prompt.push_str(&fold_messages(&r.missed, &req.prompt)),
+            None => prompt.push_str(&fold_history(&req)),
+        }
         let mut stdin = child.stdin.take().expect("stdin piped");
         tokio::spawn(async move {
             let _ = stdin.write_all(prompt.as_bytes()).await;

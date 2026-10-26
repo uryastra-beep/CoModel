@@ -9,15 +9,17 @@
   import Sidebar from "./lib/Sidebar.svelte";
   import StatusBar from "./lib/StatusBar.svelte";
   import { account, loadAccount } from "./lib/account.svelte";
-  import { canvas, openPanel, syncLinkedWorkspaces, layoutSnapshot, loadLayout, saveLayout } from "./lib/canvas.svelte";
+  import { canvas, here, openPanel, switchSpace, syncLinkedWorkspaces, layoutSnapshot, loadLayout, saveLayout } from "./lib/canvas.svelte";
+  import Menu from "./lib/Menu.svelte";
+  import { spaceChoices } from "./lib/spaces";
   import { loadProjects, projects } from "./lib/projects.svelte";
   import { startChat } from "./lib/start";
   import { onMount } from "svelte";
   import { openSettings, showCanvas, ui, toggleSidebar } from "./lib/ui.svelte";
 
-  const chats = $derived(canvas.cards.filter((c) => c.kind === "chat").length);
-  const files = $derived(canvas.cards.filter((c) => c.kind === "file").length);
-  const working = $derived(canvas.cards.filter((c) => c.busy).length);
+  const chats = $derived(here().filter((c) => c.kind === "chat").length);
+  const files = $derived(here().filter((c) => c.kind === "file").length);
+  const working = $derived(here().filter((c) => c.busy).length);
 
   onMount(() => {
     loadAccount();
@@ -76,7 +78,12 @@
   <div class="main">
     <header class="toolbar">
       <div class="where">
-        <h1>{onHome ? "Inicio" : "Lienzo"}</h1>
+        {#if onHome}
+          <h1>Inicio</h1>
+        {:else}
+          <h1 class="sr-only">Lienzo</h1>
+          <Menu up={false} label="Lienzo" icon="canvas" value={canvas.space} options={spaceChoices()} onchange={switchSpace} title="Cada proyecto tiene su propio lienzo" />
+        {/if}
         {#if !onHome}
           <span class="meta">
             {#if chats + files === 0}Vacío{:else}{chats === 1 ? "1 chat" : `${chats} chats`}{#if files}, {files === 1 ? "1 archivo" : `${files} archivos`}{/if}{/if}

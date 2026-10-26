@@ -11,7 +11,7 @@ use crate::events::ProviderEvent;
 use crate::handoff::HandoffPackage;
 use crate::interactions::Interactions;
 use crate::memory::{Memory, MemoryError};
-use crate::provider::{Provider, ProviderError, Role, TurnRequest};
+use crate::provider::{Provider, ProviderError, Resume, Role, TurnRequest};
 
 /// Límite de lo que se pega de un adjunto a una IA que no puede abrir archivos.
 const INLINE_LIMIT: usize = 100_000;
@@ -124,6 +124,7 @@ struct Collected {
     limit: Option<(String, Option<u64>)>,
     error: Option<String>,
     model: Option<String>,
+    session_id: Option<String>,
     /// (tokens de entrada, tokens de salida, coste) sumados en el turno.
     usage: Option<(u64, u64, f64)>,
 }
@@ -199,6 +200,7 @@ impl Orchestrator {
         let text = text.as_str();
         self.memory.add_message(Role::User, None, text, false)?;
         self.memory.attach_latest(&files)?;
+        let user_msg_id = self.memory.last_message_id()?;
         if let Some(title) = &self.options.title {
             self.memory.set_chat_title(title)?;
         }
@@ -232,7 +234,14 @@ impl Orchestrator {
             };
             // Modelo y esfuerzo son de la IA elegida; otra IA del relevo usa los suyos por defecto.
             let own = self.options.provider.as_deref().is_none_or(|p| p == pid);
+            // La sesión del CLI de este chat sigue viva: solo se le cuenta lo que se perdió.
+            let resume = if provider.resumable() {
+                self.memory.session_for(&pid, user_msg_id)?.map(|(session_id, missed)| Resume { session_id, missed })
+            } else {
+                None
+            };
             let req = TurnRequest {
+                resume,
                 prompt,
                 attachments: files.clone(),
                 preamble: if preamble.is_empty() { None } else { Some(preamble) },
@@ -260,6 +269,12 @@ impl Orchestrator {
                     return Err(OrchestratorError::Provider { provider: pid, message: e });
                 }
                 self.memory.add_message(Role::Assistant, Some(&pid), &col.text, false)?;
+                if self.providers[idx].resumable() {
+                    match &col.session_id {
+                        Some(sid) => self.memory.save_session(&pid, sid, self.memory.last_message_id()?)?,
+                        None => self.memory.forget_session(&pid)?,
+                    }
+                }
                 return Ok(TurnResult { provider: pid, text: col.text, handoffs });
             };
 
@@ -305,7 +320,12 @@ async fn run_provider(
         match &ev {
             ProviderEvent::Text(t) => col.text.push_str(t),
             ProviderEvent::FileTouched { path } => col.files.push(path.clone()),
-            ProviderEvent::Started { model, .. } => col.model = model.clone().or(col.model.take()),
+            ProviderEvent::Started { model, session_id, .. } => {
+                col.model = model.clone().or(col.model.take());
+                if session_id.is_some() {
+                    col.session_id = session_id.clone();
+                }
+            }
             ProviderEvent::Usage { input_tokens, output_tokens, cost_usd, .. } => {
                 let (i, o, c) = col.usage.unwrap_or((0, 0, 0.0));
                 col.usage = Some((i + input_tokens, o + output_tokens, c + cost_usd.unwrap_or(0.0)));
@@ -336,6 +356,7 @@ mod tests {
     struct Scripted {
         id: &'static str,
         reads_files: bool,
+        resumable: bool,
         scripts: Mutex<VecDeque<Vec<ProviderEvent>>>,
         seen: Arc<Mutex<Vec<TurnRequest>>>,
     }
@@ -343,7 +364,7 @@ mod tests {
     impl Scripted {
         fn new(id: &'static str, scripts: Vec<Vec<ProviderEvent>>) -> (Arc<Self>, Arc<Mutex<Vec<TurnRequest>>>) {
             let seen = Arc::new(Mutex::new(Vec::new()));
-            (Arc::new(Self { id, reads_files: true, scripts: Mutex::new(scripts.into()), seen: seen.clone() }), seen)
+            (Arc::new(Self { id, reads_files: true, resumable: false, scripts: Mutex::new(scripts.into()), seen: seen.clone() }), seen)
         }
     }
 
@@ -354,6 +375,9 @@ mod tests {
         }
         fn reads_files(&self) -> bool {
             self.reads_files
+        }
+        fn resumable(&self) -> bool {
+            self.resumable
         }
         async fn run_turn(&self, req: TurnRequest, tx: mpsc::Sender<ProviderEvent>) -> Result<(), ProviderError> {
             self.seen.lock().unwrap().push(req);
@@ -391,6 +415,46 @@ mod tests {
                 let _ = std::fs::remove_dir_all(&self.0);
             }
         }
+    }
+
+    fn started(sid: &str) -> ProviderEvent {
+        ProviderEvent::Started { session_id: Some(sid.into()), model: None, mode: None }
+    }
+
+    #[tokio::test]
+    async fn a_chat_keeps_its_cli_session_until_it_is_cut() {
+        let dir = project();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let turn = |sid: &str, t: &str| vec![started(sid), text(t), ProviderEvent::Finished];
+        let claude = Arc::new(Scripted {
+            id: "claude",
+            reads_files: true,
+            resumable: true,
+            scripts: Mutex::new(vec![turn("s1", "uno"), turn("s1", "dos"), turn("s1", "tres"), turn("s2", "cuatro")].into()),
+            seen: seen.clone(),
+        });
+        let mut orch = Orchestrator::new(vec![claude], Memory::open(&dir.0, "sesion").unwrap());
+        let (ui, _rx) = mpsc::unbounded_channel();
+
+        orch.send("a", &ui).await.unwrap();
+        assert!(seen.lock().unwrap()[0].resume.is_none(), "el primer mensaje abre sesión");
+
+        orch.send("b", &ui).await.unwrap();
+        let second = seen.lock().unwrap()[1].resume.clone().expect("continúa la sesión");
+        assert_eq!(second.session_id, "s1");
+        assert!(second.missed.is_empty(), "no hay nada que contarle: {:?}", second.missed);
+
+        // Algo que pasó sin la sesión (otra IA, un mensaje a mano) se le cuenta, sin repetir el actual.
+        orch.memory().add_message(Role::Assistant, Some("codex"), "dato de otra IA", false).unwrap();
+        orch.send("c", &ui).await.unwrap();
+        let third = seen.lock().unwrap()[2].resume.clone().expect("continúa la sesión");
+        assert_eq!(third.missed.len(), 1);
+        assert_eq!(third.missed[0].content, "dato de otra IA");
+
+        // Tras /clear la sesión no sirve: empieza una nueva.
+        orch.memory().clear_context().unwrap();
+        orch.send("d", &ui).await.unwrap();
+        assert!(seen.lock().unwrap()[3].resume.is_none());
     }
 
     #[tokio::test]
@@ -532,7 +596,7 @@ mod tests {
             let seen = Arc::new(Mutex::new(Vec::new()));
             let b = Arc::new(Scripted {
                 id: "api",
-                reads_files: false,
+                reads_files: false, resumable: false,
                 scripts: Mutex::new(vec![vec![text("ok"), ProviderEvent::Finished]].into()),
                 seen: seen.clone(),
             });

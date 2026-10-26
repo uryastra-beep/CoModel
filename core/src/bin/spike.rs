@@ -140,6 +140,31 @@ async fn main() {
                 Err(e) => println!("\nERROR: {e}"),
             }
         }
+        Some("session") => {
+            // Dos mensajes seguidos: el segundo debe continuar la sesión del CLI del primero.
+            let dir = temp_project("session");
+            let codex = args.get(1).map(String::as_str) == Some("codex");
+            let first: Arc<dyn Provider> = if codex {
+                Arc::new(comodel_core::codex::Codex::new("claude", comodel_core::codex::find_binary().expect("no se encontró codex"), false))
+            } else {
+                claude("claude")
+            };
+            let mut orch = Orchestrator::new(vec![first], Memory::open(&dir, "spike").unwrap());
+            if !codex {
+                orch.options.model = Some("haiku".into());
+            }
+            orch.options.cwd = Some(dir.clone());
+            for msg in ["Mi número secreto es 7342. Responde solo: guardado.", "¿Cuál es mi número secreto? Responde solo el número."] {
+                println!("\n>>> usuario: {msg}");
+                let before = orch.memory().session_for("claude", i64::MAX).unwrap().map(|(s, _)| s);
+                println!("    sesión guardada antes del turno: {before:?}");
+                match orch.send(msg, &ui).await {
+                    Ok(r) => println!("<<< {} respondió: {}", r.provider, r.text.trim()),
+                    Err(e) => println!("ERROR: {e}"),
+                }
+            }
+            println!("sesión guardada al final: {:?}", orch.memory().session_for("claude", i64::MAX).unwrap().map(|(s, _)| s));
+        }
         Some("demo") => {
             let dir = temp_project("demo");
             // A se agota en su 2.ª llamada; B (otro Claude) debe seguir con el contexto.

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::provider::{ChatMessage, Role};
@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE TABLE IF NOT EXISTS chats (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    chat TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    upto INTEGER NOT NULL,
+    PRIMARY KEY (chat, provider)
 );
 CREATE TABLE IF NOT EXISTS handoffs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,6 +216,54 @@ impl Memory {
         // El uso pasado permanece en su base original para no contarlo dos veces en el resumen global.
         tx.commit()?;
         Ok(())
+    }
+
+    /// Id del último mensaje del chat (0 si no hay).
+    pub fn last_message_id(&self) -> Result<i64, MemoryError> {
+        Ok(self.conn.query_row("SELECT COALESCE(MAX(id), 0) FROM messages WHERE chat = ?1", params![self.chat], |r| r.get(0))?)
+    }
+
+    /// Recuerda la sesión del CLI de `provider` y hasta qué mensaje la conoce.
+    pub fn save_session(&self, provider: &str, session_id: &str, upto: i64) -> Result<(), MemoryError> {
+        self.conn.execute(
+            "INSERT INTO sessions (chat, provider, session_id, upto) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(chat, provider) DO UPDATE SET session_id = ?3, upto = ?4",
+            params![self.chat, provider, session_id, upto],
+        )?;
+        Ok(())
+    }
+
+    pub fn forget_session(&self, provider: &str) -> Result<(), MemoryError> {
+        self.conn.execute("DELETE FROM sessions WHERE chat = ?1 AND provider = ?2", params![self.chat, provider])?;
+        Ok(())
+    }
+
+    /// La sesión de `provider` y los mensajes del chat posteriores a su último turno y anteriores a `before`.
+    /// Un resumen o un borrado de contexto posterior la invalidan: devuelve `None`.
+    pub fn session_for(&self, provider: &str, before: i64) -> Result<Option<(String, Vec<ChatMessage>)>, MemoryError> {
+        let row: Option<(String, i64)> = self
+            .conn
+            .query_row("SELECT session_id, upto FROM sessions WHERE chat = ?1 AND provider = ?2", params![self.chat, provider], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        let Some((sid, upto)) = row else { return Ok(None) };
+        let cut: i64 = self.conn.query_row("SELECT COALESCE(MAX(id), 0) FROM messages WHERE chat = ?1 AND boundary > 0", params![self.chat], |r| r.get(0))?;
+        if cut >= upto {
+            self.forget_session(provider)?;
+            return Ok(None);
+        }
+        let mut stmt = self.conn.prepare("SELECT role, provider, content, attachments FROM messages WHERE chat = ?1 AND id > ?2 AND id < ?3 AND interrupted = 0 AND boundary = 0 ORDER BY id")?;
+        let missed = stmt
+            .query_map(params![self.chat, upto, before], |r| {
+                let role: String = r.get(0)?;
+                Ok(ChatMessage {
+                    role: if role == "user" { Role::User } else { Role::Assistant },
+                    provider: r.get(1)?,
+                    content: r.get(2)?,
+                    attachments: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(Some((sid, missed)))
     }
 
     /// El último mensaje del chat pasa a ser el resumen que sustituye a lo anterior.

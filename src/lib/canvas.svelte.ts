@@ -15,6 +15,8 @@ export interface Card {
   busy: boolean;
   /** Carpeta del chat (un proyecto), o `null` si no tiene. En un archivo, su proyecto. */
   projectId: string | null;
+  /** En qué lienzo vive: `general` o el id de un proyecto. */
+  space: string;
   /** Un chat o un archivo abierto en el editor. */
   kind: "chat" | "file" | "files" | "code";
   workspacePending?: boolean;
@@ -29,7 +31,14 @@ export interface Card {
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 2;
 
+/** El lienzo de los chats que no son de ningún proyecto. */
+export const GENERAL = "general";
+
 export const canvas = $state({
+  /** Lienzo que se está viendo. Las tarjetas de los demás siguen vivas, solo ocultas. */
+  space: GENERAL,
+  /** Vista (desplazamiento y zoom) de cada lienzo que no es el actual. */
+  views: {} as Record<string, { x: number; y: number; k: number }>,
   cards: [] as Card[],
   links: [] as { a: string; b: string }[],
   projectSync: false,
@@ -41,18 +50,39 @@ export const canvas = $state({
   n: 0,
 });
 
+/** Tarjetas del lienzo que se está viendo. */
+export const here = () => canvas.cards.filter((c) => c.space === canvas.space);
+
+/** Las carpetas automáticas de cada chat (CoModel/Chats/Chat #n) no son proyectos con lienzo propio. */
+export const isChatFolder = (path: string) => /[\\/]Chats[\\/]Chat #\d+/.test(path);
+
+/** Cambia de lienzo guardando la vista del actual y recuperando la del otro. */
+export function switchSpace(space: string) {
+  if (space === canvas.space) return;
+  cancelAnimationFrame(raf);
+  canvas.views[canvas.space] = { x: canvas.view.x, y: canvas.view.y, k: canvas.view.k };
+  const v = canvas.views[space] ?? { x: 0, y: 0, k: 1 };
+  canvas.space = space;
+  canvas.view.x = v.x;
+  canvas.view.y = v.y;
+  canvas.view.k = v.k;
+  canvas.focusId = here().slice(-1)[0]?.id ?? null;
+}
+
 const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 /** Abre un chat. `at` es el centro deseado en coordenadas del lienzo; sin él, el centro de la vista. */
-export function addCard(at?: { x: number; y: number }, projectId: string | null = null, init?: { id?: string; title?: string; ai?: ChatAI }): Card {
+export function addCard(at?: { x: number; y: number }, projectId?: string | null, init?: { id?: string; title?: string; ai?: ChatAI }): Card {
   canvas.n += 1;
   const w = Math.round(30 * remPx());
   // Que quepa entera en lo que se ve del lienzo.
   const h = Math.round(Math.min(40 * remPx(), Math.max(20 * remPx(), (canvas.size.h - 64) / canvas.view.k)));
-  const cascade = (canvas.cards.length % 6) * 28;
+  const cascade = (here().length % 6) * 28;
   const cx = at?.x ?? (canvas.size.w / 2 - canvas.view.x) / canvas.view.k + cascade;
   const cy = at?.y ?? (canvas.size.h / 2 - canvas.view.y) / canvas.view.k + cascade;
+  // Un chat nuevo en el lienzo de un proyecto trabaja en la carpeta de ese proyecto.
+  const folder = projectId !== undefined ? projectId : canvas.space === GENERAL ? null : canvas.space;
   const card: Card = {
     id: init?.id ?? `c${Date.now().toString(36)}${canvas.n}`,
     title: init?.title ?? `Chat ${canvas.n}`,
@@ -62,7 +92,8 @@ export function addCard(at?: { x: number; y: number }, projectId: string | null 
     h,
     z: ++canvas.z,
     busy: false,
-    projectId,
+    projectId: folder,
+    space: canvas.space,
     kind: "chat",
     path: null,
     ai: init?.ai,
@@ -87,7 +118,7 @@ export function openFileCard(projectId: string, path: string) {
   canvas.n += 1;
   const w = Math.round(38 * remPx());
   const h = Math.round(Math.min(32 * remPx(), Math.max(18 * remPx(), (canvas.size.h - 64) / canvas.view.k)));
-  const cascade = (canvas.cards.length % 6) * 28;
+  const cascade = (here().length % 6) * 28;
   const cx = (canvas.size.w / 2 - canvas.view.x) / canvas.view.k + cascade;
   const cy = (canvas.size.h / 2 - canvas.view.y) / canvas.view.k + cascade;
   const card: Card = {
@@ -100,6 +131,7 @@ export function openFileCard(projectId: string, path: string) {
     z: ++canvas.z,
     busy: false,
     projectId,
+    space: canvas.space,
     kind: "file",
     path,
   };
@@ -114,7 +146,7 @@ export function removeCard(id: string) {
   const kind = canvas.cards[i].kind;
   canvas.cards.splice(i, 1);
   canvas.links = canvas.links.filter((l) => l.a !== id && l.b !== id);
-  if (canvas.focusId === id) canvas.focusId = canvas.cards[canvas.cards.length - 1]?.id ?? null;
+  if (canvas.focusId === id) canvas.focusId = here().slice(-1)[0]?.id ?? null;
   if (kind === "chat") void closeChat(id).catch(() => {});
 }
 
@@ -204,6 +236,8 @@ export async function setCardProject(id: string, projectId: string | null) {
 /** Cierra los chats y archivos de un proyecto (cuando se quita de CoModel). */
 export function removeCardsOfProject(projectId: string) {
   for (const c of [...canvas.cards]) if (c.projectId === projectId) removeCard(c.id);
+  if (canvas.space === projectId) switchSpace(GENERAL);
+  delete canvas.views[projectId];
 }
 
 export function setBusy(id: string, busy: boolean) {
@@ -267,7 +301,7 @@ export function resetZoom() {
 
 /** Encuadra todas las tarjetas. Sin tarjetas, vuelve al origen. */
 export function fitAll() {
-  const cards = canvas.cards;
+  const cards = here();
   if (!cards.length) {
     tweenView({ x: 0, y: 0, k: 1 });
     return;
@@ -284,6 +318,7 @@ export function fitAll() {
 export function centerOn(id: string) {
   const c = canvas.cards.find((c) => c.id === id);
   if (!c) return;
+  switchSpace(c.space);
   const k = canvas.view.k;
   tweenView({ x: canvas.size.w / 2 - (c.x + c.w / 2) * k, y: canvas.size.h / 2 - (c.y + c.h / 2) * k, k });
   focusCard(id);
@@ -305,7 +340,9 @@ const LAYOUT_KEY = "comodel.layout.v2";
 
 interface SavedLayout {
   links?: { a: string; b: string }[];
-  cards: { id: string; title: string; x: number; y: number; w: number; h: number; projectId: string | null; kind?: Card["kind"]; path?: string | null; content?: string; language?: string; ai?: ChatAI }[];
+  space?: string;
+  views?: Record<string, { x: number; y: number; k: number }>;
+  cards: { id: string; space?: string; title: string; x: number; y: number; w: number; h: number; projectId: string | null; kind?: Card["kind"]; path?: string | null; content?: string; language?: string; ai?: ChatAI }[];
   view: { x: number; y: number; k: number };
   n: number;
 }
@@ -313,8 +350,10 @@ interface SavedLayout {
 /** Lo que se guarda. Leer los campos aquí hace que quien lo llame dentro de un efecto se entere de los cambios. */
 export function layoutSnapshot(): SavedLayout {
   return {
+    space: canvas.space,
+    views: { ...Object.fromEntries(Object.entries(canvas.views).map(([k, v]) => [k, { ...v }])) },
     links: canvas.links.map((l) => ({ ...l })),
-    cards: canvas.cards.map((c) => ({ id: c.id, title: c.title, x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h), projectId: c.projectId, kind: c.kind, path: c.path, content: c.content, language: c.language, ai: c.ai ? { ...c.ai } : undefined })),
+    cards: canvas.cards.map((c) => ({ id: c.id, space: c.space, title: c.title, x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h), projectId: c.projectId, kind: c.kind, path: c.path, content: c.content, language: c.language, ai: c.ai ? { ...c.ai } : undefined })),
     view: { x: Math.round(canvas.view.x), y: Math.round(canvas.view.y), k: Math.round(canvas.view.k * 1000) / 1000 },
     n: canvas.n,
   };
@@ -340,8 +379,13 @@ export function loadLayout(exists: (projectId: string) => boolean) {
   // Un archivo de un proyecto que ya no existe no se puede abrir: se descarta. Un chat sin su proyecto se queda sin carpeta.
   canvas.cards = (saved?.cards ?? [])
     .filter((c) => c.kind !== "file" || (c.projectId && exists(c.projectId)))
-    .map((c) => ({ ...c, kind: c.kind ?? "chat", path: c.path ?? null, projectId: c.projectId && exists(c.projectId) ? c.projectId : null, z: ++canvas.z, busy: false }));
+    .map((c) => ({ ...c, space: c.space ?? GENERAL, kind: c.kind ?? "chat", path: c.path ?? null, projectId: c.projectId && exists(c.projectId) ? c.projectId : null, z: ++canvas.z, busy: false }));
   canvas.links = (saved?.links ?? []).filter((l) => l.a !== l.b && [l.a, l.b].every((id) => canvas.cards.some((c) => c.id === id && c.kind === "chat")));
+  // Un lienzo de un proyecto que ya no existe vuelve al general.
+  const known = (id: string) => id === GENERAL || exists(id);
+  for (const c of canvas.cards) if (!known(c.space)) c.space = GENERAL;
+  canvas.views = Object.fromEntries(Object.entries(saved?.views ?? {}).filter(([k]) => known(k) && k !== GENERAL));
+  canvas.space = saved?.space && known(saved.space) ? saved.space : GENERAL;
   canvas.focusId = null;
   canvas.n = saved?.n ?? 0;
   canvas.view.x = saved?.view.x ?? 0;
@@ -378,7 +422,11 @@ export async function toggleChatLink(a: string, b: string) {
   canvas.projectError = "";
   try {
     await assignWorkspace(members, projectId);
-    canvas.links.push({ a, b });
+    // Conectar dos chats une también a todos los que ya estaban conectados con cada uno: cada chat de un grupo queda conectado con cada chat del otro.
+    const has = (x: string, y: string) => canvas.links.some((l) => (l.a === x && l.b === y) || (l.a === y && l.b === x));
+    const groupA = [first, ...linkedChats(a)];
+    const groupB = [second, ...linkedChats(b)];
+    for (const x of groupA) for (const y of groupB) if (x.id !== y.id && !has(x.id, y.id)) canvas.links.push({ a: x.id, b: y.id });
   } catch (e) { canvas.projectError = String(e); }
   finally { canvas.projectSync = false; saveLayout(); }
 }

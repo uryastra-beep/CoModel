@@ -7,7 +7,7 @@
   import { ms } from "./motion";
   import { onFileDrop } from "./backend";
   import { fade } from "svelte/transition";
-  import { addCard, canvas, fitAll, focusCard, moveCard, panBy, removeCard, renameCard, resetZoom, resizeCard, setBusy, setCardProject, zoomAt, zoomStep } from "./canvas.svelte";
+  import { addCard, canvas, fitAll, here, focusCard, moveCard, panBy, removeCard, renameCard, resetZoom, resizeCard, setBusy, setCardProject, zoomAt, zoomStep } from "./canvas.svelte";
   import Minimap from "./Minimap.svelte";
   import { startChat } from "./start";
   import { ui } from "./ui.svelte";
@@ -123,10 +123,12 @@
       {#each canvas.links as link}
         {@const a = canvas.cards.find((c) => c.id === link.a)}
         {@const b = canvas.cards.find((c) => c.id === link.b)}
-        {#if a && b}<path d="M {a.x + a.w / 2} {a.y + 22} C {a.x + a.w / 2} {a.y - 65}, {b.x + b.w / 2} {b.y - 65}, {b.x + b.w / 2} {b.y + 22}" />{/if}
+        {#if a && b && a.space === canvas.space && b.space === canvas.space}<path d="M {a.x + a.w / 2} {a.y + 22} C {a.x + a.w / 2} {a.y - 65}, {b.x + b.w / 2} {b.y - 65}, {b.x + b.w / 2} {b.y + 22}" />{/if}
       {/each}
     </svg>
     {#each canvas.cards as card (card.id)}
+      <!-- Las tarjetas de otros lienzos siguen vivas (un chat puede estar respondiendo), solo se ocultan. -->
+      <div class="slot" hidden={card.space !== canvas.space} inert={card.space !== canvas.space}>
       {#if card.kind === "file"}
         <FileCard
           {card}
@@ -155,10 +157,11 @@
           onproject={(p) => setCardProject(card.id, p)}
         />
       {/if}
+      </div>
     {/each}
   </div>
 
-  {#if canvas.cards.length === 0}
+  {#if here().length === 0}
     <div class="empty" in:fade={{ duration: ms(220), delay: ms(80) }} out:fade={{ duration: ms(140) }}>
       <div class="intro">
         <h2>El lienzo está vacío</h2>
@@ -181,12 +184,18 @@
     <button class="pct" onclick={resetZoom} title="Volver a 100%">{Math.round(canvas.view.k * 100)}%</button>
     <button class="icon-btn sm" onclick={() => zoomStep(1.2)} aria-label="Acercar" title="Acercar (Ctrl+rueda)"><Icon name="plus" size="0.95rem" /></button>
     <span class="vsep" aria-hidden="true"></span>
-    <button class="icon-btn sm" onclick={fitAll} disabled={canvas.cards.length === 0} aria-label="Encuadrar todo" title="Encuadrar todos los chats"><Icon name="fit" size="0.95rem" /></button>
+    <button class="icon-btn sm" onclick={fitAll} disabled={here().length === 0} aria-label="Encuadrar todo" title="Encuadrar todos los chats"><Icon name="fit" size="0.95rem" /></button>
   </div>
-  {#if canvas.cards.length > 0}<Minimap />{/if}
+  {#if here().length > 0}<Minimap />{/if}
 </div>
 
 <style>
+  .slot {
+    display: contents;
+  }
+  .slot[hidden] {
+    display: none;
+  }
   .canvas {
     position: relative;
     height: 100%;

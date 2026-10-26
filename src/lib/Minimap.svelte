@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { canvas } from "./canvas.svelte";
+  import { canvas, here } from "./canvas.svelte";
 
   let box: HTMLDivElement;
 
@@ -19,7 +19,7 @@
     let y0 = Math.min(canvas.size.h / 2 - canvas.size.h * 1.5, view.y);
     let x1 = Math.max(canvas.size.w / 2 + canvas.size.w * 1.5, view.x + view.w);
     let y1 = Math.max(canvas.size.h / 2 + canvas.size.h * 1.5, view.y + view.h);
-    for (const c of canvas.cards) {
+    for (const c of here()) {
       x0 = Math.min(x0, c.x);
       y0 = Math.min(y0, c.y);
       x1 = Math.max(x1, c.x + c.w);
@@ -79,7 +79,7 @@
   {onkeydown}
 >
   <svg viewBox="{bounds.x} {bounds.y} {bounds.w} {bounds.h}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-    {#each canvas.cards as c (c.id)}
+    {#each here() as c (c.id)}
       <rect class="card" class:focus={canvas.focusId === c.id} class:busy={c.busy} x={c.x} y={c.y} width={c.w} height={c.h} rx="16" />
     {/each}
     <rect class="view" x={view.x} y={view.y} width={view.w} height={view.h} />
