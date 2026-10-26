@@ -31,16 +31,21 @@ export interface Card {
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 2;
 
-/** El lienzo de los chats que no son de ningún proyecto. */
-export const GENERAL = "general";
+/** Un workspace: un lienzo con sus chats, que comparten una carpeta y una memoria. */
+export interface Workspace {
+  id: string;
+  name: string;
+  /** Su carpeta de trabajo; se prepara sola antes del primer mensaje. */
+  projectId: string | null;
+}
 
 export const canvas = $state({
-  /** Lienzo que se está viendo. Las tarjetas de los demás siguen vivas, solo ocultas. */
-  space: GENERAL,
-  /** Vista (desplazamiento y zoom) de cada lienzo que no es el actual. */
+  /** Workspace que se está viendo (vacío si no hay ninguno). Las tarjetas de los demás siguen vivas, solo ocultas. */
+  space: "",
+  workspaces: [] as Workspace[],
+  /** Vista (desplazamiento y zoom) de cada workspace que no es el actual. */
   views: {} as Record<string, { x: number; y: number; k: number }>,
   cards: [] as Card[],
-  links: [] as { a: string; b: string }[],
   projectSync: false,
   projectError: "",
   view: { x: 0, y: 0, k: 1 },
@@ -48,25 +53,58 @@ export const canvas = $state({
   focusId: null as string | null,
   z: 1,
   n: 0,
+  /** Contador para dar nombre a los workspaces nuevos. */
+  wn: 0,
 });
 
-/** Tarjetas del lienzo que se está viendo. */
+/** Tarjetas del workspace que se está viendo. */
 export const here = () => canvas.cards.filter((c) => c.space === canvas.space);
 
-/** Las carpetas automáticas de cada chat (CoModel/Chats/Chat #n) no son proyectos con lienzo propio. */
-export const isChatFolder = (path: string) => /[\\/]Chats[\\/]Chat #\d+/.test(path);
+export const workspaceById = (id: string | null | undefined) => (id ? (canvas.workspaces.find((w) => w.id === id) ?? null) : null);
 
-/** Cambia de lienzo guardando la vista del actual y recuperando la del otro. */
+/** Las carpetas automáticas (CoModel/Chats/Workspace #n) no son proyectos que el usuario haya añadido. */
+export const isChatFolder = (path: string) => /[\\/]Chats[\\/](Chat|Workspace) #\d+/.test(path);
+
+/** Cambia de workspace guardando la vista del actual y recuperando la del otro. */
 export function switchSpace(space: string) {
   if (space === canvas.space) return;
   cancelAnimationFrame(raf);
-  canvas.views[canvas.space] = { x: canvas.view.x, y: canvas.view.y, k: canvas.view.k };
+  if (canvas.space) canvas.views[canvas.space] = { x: canvas.view.x, y: canvas.view.y, k: canvas.view.k };
   const v = canvas.views[space] ?? { x: 0, y: 0, k: 1 };
   canvas.space = space;
   canvas.view.x = v.x;
   canvas.view.y = v.y;
   canvas.view.k = v.k;
   canvas.focusId = here().slice(-1)[0]?.id ?? null;
+}
+
+/** Crea un workspace vacío y pasa a verlo. */
+export function addWorkspace(name?: string, projectId: string | null = null): Workspace {
+  canvas.wn += 1;
+  const ws: Workspace = { id: `w${Date.now().toString(36)}${canvas.wn}`, name: (name ?? `Workspace ${canvas.wn}`).trim().slice(0, 40), projectId };
+  canvas.workspaces.push(ws);
+  switchSpace(ws.id);
+  return ws;
+}
+
+export function renameWorkspace(id: string, name: string) {
+  const ws = workspaceById(id);
+  const n = name.trim();
+  if (ws && n) ws.name = n.slice(0, 40);
+}
+
+/** Cierra un workspace y sus tarjetas. El historial de sus chats se conserva en su carpeta. */
+export function removeWorkspace(id: string) {
+  for (const c of [...canvas.cards]) if (c.space === id) removeCard(c.id);
+  const i = canvas.workspaces.findIndex((w) => w.id === id);
+  if (i < 0) return;
+  const wasCurrent = canvas.space === id;
+  canvas.workspaces.splice(i, 1);
+  delete canvas.views[id];
+  if (wasCurrent) {
+    canvas.space = "";
+    switchSpace(canvas.workspaces[Math.min(i, canvas.workspaces.length - 1)]?.id ?? "");
+  }
 }
 
 const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -78,11 +116,13 @@ export function addCard(at?: { x: number; y: number }, projectId?: string | null
   const w = Math.round(30 * remPx());
   // Que quepa entera en lo que se ve del lienzo.
   const h = Math.round(Math.min(40 * remPx(), Math.max(20 * remPx(), (canvas.size.h - 64) / canvas.view.k)));
+  // Sin workspace donde ponerlo, se abre uno.
+  const ws = workspaceById(canvas.space) ?? addWorkspace();
   const cascade = (here().length % 6) * 28;
   const cx = at?.x ?? (canvas.size.w / 2 - canvas.view.x) / canvas.view.k + cascade;
   const cy = at?.y ?? (canvas.size.h / 2 - canvas.view.y) / canvas.view.k + cascade;
-  // Un chat nuevo en el lienzo de un proyecto trabaja en la carpeta de ese proyecto.
-  const folder = projectId !== undefined ? projectId : canvas.space === GENERAL ? null : canvas.space;
+  // Un chat nuevo trabaja en la carpeta de su workspace.
+  const folder = projectId !== undefined ? projectId : ws.projectId;
   const card: Card = {
     id: init?.id ?? `c${Date.now().toString(36)}${canvas.n}`,
     title: init?.title ?? `Chat ${canvas.n}`,
@@ -145,7 +185,6 @@ export function removeCard(id: string) {
   if (i < 0) return;
   const kind = canvas.cards[i].kind;
   canvas.cards.splice(i, 1);
-  canvas.links = canvas.links.filter((l) => l.a !== id && l.b !== id);
   if (canvas.focusId === id) canvas.focusId = here().slice(-1)[0]?.id ?? null;
   if (kind === "chat") void closeChat(id).catch(() => {});
 }
@@ -186,8 +225,8 @@ export function renameCard(id: string, title: string) {
 
 const workspaceJobs = new Map<string, Promise<void>>();
 
-async function automaticProject(card: Card) {
-  const p = await createChatWorkspace(card.id, card.title);
+async function automaticProject(ws: Workspace) {
+  const p = await createChatWorkspace(ws.id, ws.name);
   if (!projects.list.some((x) => x.id === p.id)) projects.list = [...projects.list, p];
   return p;
 }
@@ -198,11 +237,13 @@ export function ensureChatWorkspace(id: string): Promise<void> {
   if (existing) return existing;
   const card = canvas.cards.find((c) => c.id === id && c.kind === "chat");
   if (!card || card.projectId) return Promise.resolve();
+  const ws = workspaceById(card.space);
   const members = [card, ...linkedChats(id)];
   members.forEach((c) => (c.workspacePending = true));
   const job = (async () => {
-    const projectId = members.find((c) => c.projectId)?.projectId ?? (await automaticProject(card)).id;
+    const projectId = ws?.projectId ?? members.find((c) => c.projectId)?.projectId ?? (await automaticProject(ws ?? { id: card.id, name: card.title, projectId: null })).id;
     await assignWorkspace(members, projectId);
+    if (ws) ws.projectId = projectId;
   })().finally(() => {
     members.forEach((c) => { c.workspacePending = false; workspaceJobs.delete(c.id); });
     saveLayout();
@@ -228,6 +269,9 @@ export async function setCardProject(id: string, projectId: string | null) {
   canvas.projectError = "";
   try {
     await assignWorkspace(c.kind === "chat" ? [c, ...linkedChats(id)] : [c], projectId);
+    // La carpeta es del workspace entero.
+    const ws = workspaceById(c.space);
+    if (ws && c.kind === "chat") ws.projectId = projectId;
   }
   catch (e) { canvas.projectError = String(e); }
   finally { canvas.projectSync = false; saveLayout(); }
@@ -236,8 +280,7 @@ export async function setCardProject(id: string, projectId: string | null) {
 /** Cierra los chats y archivos de un proyecto (cuando se quita de CoModel). */
 export function removeCardsOfProject(projectId: string) {
   for (const c of [...canvas.cards]) if (c.projectId === projectId) removeCard(c.id);
-  if (canvas.space === projectId) switchSpace(GENERAL);
-  delete canvas.views[projectId];
+  for (const w of canvas.workspaces.filter((w) => w.projectId === projectId)) removeWorkspace(w.id);
 }
 
 export function setBusy(id: string, busy: boolean) {
@@ -338,24 +381,44 @@ export function rescaleCards(ratio: number) {
 
 const LAYOUT_KEY = "comodel.layout.v2";
 
+interface SavedCard {
+  id: string;
+  space?: string;
+  title: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  projectId: string | null;
+  kind?: Card["kind"];
+  path?: string | null;
+  content?: string;
+  language?: string;
+  ai?: ChatAI;
+}
+
 interface SavedLayout {
+  workspaces?: Workspace[];
+  /** Solo de versiones anteriores: chats conectados. */
   links?: { a: string; b: string }[];
   space?: string;
   views?: Record<string, { x: number; y: number; k: number }>;
-  cards: { id: string; space?: string; title: string; x: number; y: number; w: number; h: number; projectId: string | null; kind?: Card["kind"]; path?: string | null; content?: string; language?: string; ai?: ChatAI }[];
+  cards: SavedCard[];
   view: { x: number; y: number; k: number };
   n: number;
+  wn?: number;
 }
 
 /** Lo que se guarda. Leer los campos aquí hace que quien lo llame dentro de un efecto se entere de los cambios. */
 export function layoutSnapshot(): SavedLayout {
   return {
+    workspaces: canvas.workspaces.map((w) => ({ ...w })),
     space: canvas.space,
     views: { ...Object.fromEntries(Object.entries(canvas.views).map(([k, v]) => [k, { ...v }])) },
-    links: canvas.links.map((l) => ({ ...l })),
     cards: canvas.cards.map((c) => ({ id: c.id, space: c.space, title: c.title, x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h), projectId: c.projectId, kind: c.kind, path: c.path, content: c.content, language: c.language, ai: c.ai ? { ...c.ai } : undefined })),
     view: { x: Math.round(canvas.view.x), y: Math.round(canvas.view.y), k: Math.round(canvas.view.k * 1000) / 1000 },
     n: canvas.n,
+    wn: canvas.wn,
   };
 }
 
@@ -367,30 +430,100 @@ export function saveLayout() {
   }
 }
 
-/** Pone en el lienzo lo guardado. `exists` indica qué proyectos siguen existiendo: los chats de uno que ya no está se quedan sin carpeta. */
-export function loadLayout(exists: (projectId: string) => boolean) {
+/** Convierte lo guardado antes de los workspaces: un workspace por cada grupo de chats conectados, y uno por cada proyecto que tenía su lienzo. */
+function migrate(saved: SavedLayout, cards: SavedCard[], projectName: (id: string) => string | null): { workspaces: Workspace[]; spaceOf: Map<string, string>; views: Record<string, { x: number; y: number; k: number }>; current: string } {
+  const workspaces: Workspace[] = [];
+  const spaceOf = new Map<string, string>();
+  const views: Record<string, { x: number; y: number; k: number }> = {};
+  let wn = 0;
+  const make = (name: string, projectId: string | null) => {
+    wn += 1;
+    const ws: Workspace = { id: `w${Date.now().toString(36)}${wn}`, name: name.slice(0, 40), projectId };
+    workspaces.push(ws);
+    return ws;
+  };
+  const generalView = (saved.space && saved.space !== "general" ? saved.views?.general : saved.view) ?? { x: 0, y: 0, k: 1 };
+  const inGeneral = (c: SavedCard) => !c.space || c.space === "general" || projectName(c.space) === null;
+
+  // Lienzos de proyecto: cada uno pasa a ser un workspace con el nombre del proyecto.
+  for (const space of new Set(cards.filter((c) => !inGeneral(c)).map((c) => c.space!))) {
+    const ws = make(projectName(space)!, space);
+    cards.filter((c) => c.space === space).forEach((c) => spaceOf.set(c.id, ws.id));
+    views[ws.id] = (saved.space === space ? saved.view : saved.views?.[space]) ?? { x: 0, y: 0, k: 1 };
+  }
+  // Chats sueltos: los conectados entre sí forman un workspace; los demás, uno cada uno.
+  const chats = cards.filter((c) => inGeneral(c) && (c.kind ?? "chat") === "chat");
+  const parent = new Map(chats.map((c) => [c.id, c.id]));
+  const find = (x: string): string => (parent.get(x) === x ? x : find(parent.get(x)!));
+  for (const l of saved.links ?? []) if (parent.has(l.a) && parent.has(l.b)) parent.set(find(l.a), find(l.b));
+  const groups = new Map<string, SavedCard[]>();
+  for (const c of chats) groups.set(find(c.id), [...(groups.get(find(c.id)) ?? []), c]);
+  for (const members of groups.values()) {
+    const ws = make(members[0].title, members.find((c) => c.projectId)?.projectId ?? null);
+    members.forEach((c) => spaceOf.set(c.id, ws.id));
+    views[ws.id] = generalView;
+  }
+  // Archivos y paneles: con el workspace de su proyecto, o con el primero.
+  for (const c of cards.filter((c) => inGeneral(c) && (c.kind ?? "chat") !== "chat")) {
+    const ws = workspaces.find((w) => w.projectId && w.projectId === c.projectId) ?? workspaces[0] ?? make("Workspace 1", c.projectId);
+    if (!views[ws.id]) views[ws.id] = generalView;
+    spaceOf.set(c.id, ws.id);
+  }
+  canvas.wn = Math.max(saved.wn ?? 0, wn);
+  const currentCard = cards.find((c) => c.space === saved.space) ?? cards.find((c) => c.id === (saved as { focusId?: string }).focusId);
+  const current = (saved.space && saved.space !== "general" ? workspaces.find((w) => w.projectId === saved.space)?.id : undefined) ?? (currentCard ? spaceOf.get(currentCard.id) : undefined) ?? workspaces[0]?.id ?? "";
+  return { workspaces, spaceOf, views, current };
+}
+
+/** Pone en el lienzo lo guardado. `projectName` da el nombre de un proyecto, o `null` si ya no existe: los chats de uno que ya no está se quedan sin carpeta. */
+export function loadLayout(projectName: (projectId: string) => string | null) {
   cancelAnimationFrame(raf);
+  const exists = (id: string) => projectName(id) !== null;
   let saved: SavedLayout | null = null;
   try {
     saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null") as SavedLayout | null;
   } catch {
     saved = null;
   }
-  // Un archivo de un proyecto que ya no existe no se puede abrir: se descarta. Un chat sin su proyecto se queda sin carpeta.
-  canvas.cards = (saved?.cards ?? [])
-    .filter((c) => c.kind !== "file" || (c.projectId && exists(c.projectId)))
-    .map((c) => ({ ...c, space: c.space ?? GENERAL, kind: c.kind ?? "chat", path: c.path ?? null, projectId: c.projectId && exists(c.projectId) ? c.projectId : null, z: ++canvas.z, busy: false }));
-  canvas.links = (saved?.links ?? []).filter((l) => l.a !== l.b && [l.a, l.b].every((id) => canvas.cards.some((c) => c.id === id && c.kind === "chat")));
-  // Un lienzo de un proyecto que ya no existe vuelve al general.
-  const known = (id: string) => id === GENERAL || exists(id);
-  for (const c of canvas.cards) if (!known(c.space)) c.space = GENERAL;
-  canvas.views = Object.fromEntries(Object.entries(saved?.views ?? {}).filter(([k]) => known(k) && k !== GENERAL));
-  canvas.space = saved?.space && known(saved.space) ? saved.space : GENERAL;
+  // Un archivo de un proyecto que ya no existe no se puede abrir: se descarta.
+  const cards = (saved?.cards ?? []).filter((c) => c.kind !== "file" || (c.projectId && exists(c.projectId)));
+  let current = "";
+  let views: Record<string, { x: number; y: number; k: number }> = {};
+  let spaceOf = new Map<string, string>();
+  if (saved?.workspaces) {
+    canvas.workspaces = saved.workspaces.map((w) => ({ ...w, projectId: w.projectId && exists(w.projectId) ? w.projectId : null }));
+    for (const c of cards) if (c.space && canvas.workspaces.some((w) => w.id === c.space)) spaceOf.set(c.id, c.space);
+    views = saved.views ?? {};
+    current = saved.space && canvas.workspaces.some((w) => w.id === saved!.space) ? saved.space : (canvas.workspaces[0]?.id ?? "");
+    canvas.wn = saved.wn ?? canvas.workspaces.length;
+  } else if (saved) {
+    const m = migrate(saved, cards, projectName);
+    canvas.workspaces = m.workspaces;
+    spaceOf = m.spaceOf;
+    views = m.views;
+    current = m.current;
+  } else {
+    canvas.workspaces = [];
+    canvas.wn = 0;
+  }
+  canvas.cards = cards
+    .filter((c) => spaceOf.has(c.id))
+    .map((c) => ({ ...c, space: spaceOf.get(c.id)!, kind: c.kind ?? "chat", path: c.path ?? null, projectId: c.projectId && exists(c.projectId) ? c.projectId : null, z: ++canvas.z, busy: false }));
+  canvas.views = views;
+  canvas.space = "";
   canvas.focusId = null;
   canvas.n = saved?.n ?? 0;
-  canvas.view.x = saved?.view.x ?? 0;
-  canvas.view.y = saved?.view.y ?? 0;
-  canvas.view.k = saved?.view.k ?? 1;
+  canvas.view.x = 0;
+  canvas.view.y = 0;
+  canvas.view.k = 1;
+  // Se entra por el workspace que se estaba viendo, con su vista guardada.
+  const v = (saved?.workspaces ? saved.view : views[current]) ?? { x: 0, y: 0, k: 1 };
+  canvas.space = current;
+  canvas.view.x = v.x;
+  canvas.view.y = v.y;
+  canvas.view.k = v.k;
+  delete canvas.views[current];
+  canvas.focusId = here().slice(-1)[0]?.id ?? null;
 }
 
 /** Paneles independientes; el selector de archivos no depende del chat enfocado. */
@@ -404,34 +537,7 @@ export function openPanel(kind: "files" | "code", projectId: string | null = nul
   return card;
 }
 
-export async function toggleChatLink(a: string, b: string) {
-  if (canvas.projectSync || a === b || ![a, b].every((id) => canvas.cards.some((c) => c.id === id && c.kind === "chat"))) return;
-  const i = canvas.links.findIndex((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a));
-  if (i >= 0) { canvas.links.splice(i, 1); return; }
-  const first = canvas.cards.find((c) => c.id === a)!;
-  const second = canvas.cards.find((c) => c.id === b)!;
-  const members = [...new Map([first, ...linkedChats(a), second, ...linkedChats(b)].map((c) => [c.id, c])).values()];
-  if (members.some((c) => c.workspacePending || c.busy)) {
-    canvas.projectError = "Espera a que terminen los chats que quieres conectar.";
-    return;
-  }
-  if (members.length > 33) { canvas.projectError = "Conecta como máximo 33 chats por grupo."; return; }
-  // Manda la carpeta del chat desde el que se conecta; si no tiene, se hereda la del otro grupo.
-  const projectId = first.projectId ?? members.find((c) => c.projectId)?.projectId ?? null;
-  canvas.projectSync = true;
-  canvas.projectError = "";
-  try {
-    await assignWorkspace(members, projectId);
-    // Conectar dos chats une también a todos los que ya estaban conectados con cada uno: cada chat de un grupo queda conectado con cada chat del otro.
-    const has = (x: string, y: string) => canvas.links.some((l) => (l.a === x && l.b === y) || (l.a === y && l.b === x));
-    const groupA = [first, ...linkedChats(a)];
-    const groupB = [second, ...linkedChats(b)];
-    for (const x of groupA) for (const y of groupB) if (x.id !== y.id && !has(x.id, y.id)) canvas.links.push({ a: x.id, b: y.id });
-  } catch (e) { canvas.projectError = String(e); }
-  finally { canvas.projectSync = false; saveLayout(); }
-}
-
-/** Alinea también los grupos conectados con versiones anteriores de CoModel. */
+/** Alinea la carpeta de los chats de cada workspace (los de versiones anteriores podían tener cada uno la suya). */
 export async function syncLinkedWorkspaces() {
   const visited = new Set<string>();
   for (const card of canvas.cards.filter((c) => c.kind === "chat")) {
@@ -446,16 +552,8 @@ export async function syncLinkedWorkspaces() {
   }
 }
 
-/** Todos los chats del grupo conectado reciben el contexto de sus compañeros en cada turno. */
+/** Los demás chats del mismo workspace: comparten su carpeta y reciben el contexto de sus compañeros en cada turno. */
 export function linkedChats(id: string) {
-  const ids = new Set([id]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const l of canvas.links) {
-      if (ids.has(l.a) && !ids.has(l.b)) { ids.add(l.b); changed = true; }
-      if (ids.has(l.b) && !ids.has(l.a)) { ids.add(l.a); changed = true; }
-    }
-  }
-  return canvas.cards.filter((c) => c.kind === "chat" && c.id !== id && ids.has(c.id));
+  const space = canvas.cards.find((c) => c.id === id)?.space;
+  return canvas.cards.filter((c) => c.kind === "chat" && c.id !== id && c.space === space);
 }

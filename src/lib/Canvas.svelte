@@ -119,13 +119,6 @@
   ondblclick={onDblClick}
 >
   <div class="world" data-world="1" style:transform="translate({canvas.view.x}px, {canvas.view.y}px) scale({canvas.view.k})">
-    <svg class="connections" aria-label="Conexiones de memoria compartida">
-      {#each canvas.links as link}
-        {@const a = canvas.cards.find((c) => c.id === link.a)}
-        {@const b = canvas.cards.find((c) => c.id === link.b)}
-        {#if a && b && a.space === canvas.space && b.space === canvas.space}<path d="M {a.x + a.w / 2} {a.y + 22} C {a.x + a.w / 2} {a.y - 65}, {b.x + b.w / 2} {b.y - 65}, {b.x + b.w / 2} {b.y + 22}" />{/if}
-      {/each}
-    </svg>
     {#each canvas.cards as card (card.id)}
       <!-- Las tarjetas de otros lienzos siguen vivas (un chat puede estar respondiendo), solo se ocultan. -->
       <div class="slot" hidden={card.space !== canvas.space} inert={card.space !== canvas.space}>
@@ -164,11 +157,11 @@
   {#if here().length === 0}
     <div class="empty" in:fade={{ duration: ms(220), delay: ms(80) }} out:fade={{ duration: ms(140) }}>
       <div class="intro">
-        <h2>El lienzo está vacío</h2>
-        <p class="lead">Cada chat es una tarjeta que puedes mover y agrandar. Pon varios uno al lado del otro para trabajar con distintas IAs a la vez.</p>
+        <h2>{canvas.workspaces.length ? "Este workspace está vacío" : "Empieza con un workspace"}</h2>
+        <p class="lead">Un workspace es un lienzo con su propia carpeta. Cada chat es una tarjeta que puedes mover y agrandar; pon varios uno al lado del otro para trabajar con distintas IAs a la vez.</p>
         <ul>
           <li><Icon name="chat" size="1rem" /><span><b>Abre un chat</b> con doble clic en el lienzo o con <kbd>N</kbd>.</span></li>
-          <li><Icon name="memory" size="1rem" /><span><b>Comparten memoria</b>: en un proyecto, todas leen y escriben las mismas notas.</span></li>
+          <li><Icon name="memory" size="1rem" /><span><b>Comparten memoria</b>: los chats de un workspace leen y escriben las mismas notas.</span></li>
           <li><Icon name="relay" size="1rem" /><span><b>Relevo automático</b>: si una se queda sin uso, sigue la siguiente.</span></li>
         </ul>
         <div class="acts">
@@ -207,8 +200,6 @@
   .canvas.panning {
     cursor: grabbing;
   }
-  .connections { position: absolute; overflow: visible; width: 1px; height: 1px; pointer-events: none; }
-  .connections path { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0.65; }
   .world {
     position: absolute;
     left: 0;

@@ -454,7 +454,7 @@ async fn create_project(state: State<'_, AppState>, name: String, path: String, 
     state.projects.lock().await.create(&name, &PathBuf::from(path), relay).map_err(|e| e.to_string())
 }
 
-/// Asigna una carpeta persistente dentro de CoModel/Chats a una conversación sin proyecto.
+/// Asigna una carpeta persistente dentro de CoModel/Chats a un workspace sin proyecto (los antiguos "Chat #n" se siguen reconociendo).
 #[tauri::command]
 async fn create_chat_workspace(state: State<'_, AppState>, chat_id: String, title: String) -> Result<Project, String> {
     if !valid_id(&chat_id) { return Err("Identificador de chat no válido.".into()); }
@@ -468,7 +468,7 @@ async fn create_chat_workspace(state: State<'_, AppState>, chat_id: String, titl
         let entry = entry.map_err(|e| e.to_string())?;
         if !entry.file_type().map_err(|e| e.to_string())?.is_dir() { continue; }
         let name = entry.file_name().to_string_lossy().to_string();
-        if let Some(n) = name.strip_prefix("Chat #").and_then(|s| s.split(" - ").next()).and_then(|s| s.parse::<u64>().ok()) { number = number.max(n); }
+        if let Some(n) = name.strip_prefix("Workspace #").or_else(|| name.strip_prefix("Chat #")).and_then(|s| s.split(" - ").next()).and_then(|s| s.parse::<u64>().ok()) { number = number.max(n); }
         let marker = entry.path().join(".comodel/workspace-chat.json");
         if let Ok(data) = std::fs::read_to_string(marker) {
             if serde_json::from_str::<serde_json::Value>(&data).ok().and_then(|v| v.get("chat_id").and_then(|id| id.as_str()).map(str::to_string)).as_deref() == Some(chat_id.as_str()) { found = Some(entry.path()); }
@@ -482,7 +482,7 @@ async fn create_chat_workspace(state: State<'_, AppState>, chat_id: String, titl
             let title = if title.is_empty() { "Sin título" } else { title };
             let path = loop {
                 number = number.checked_add(1).ok_or("No se pudo asignar un número al chat.")?;
-                let candidate = root.join(format!("Chat #{number} - {title}"));
+                let candidate = root.join(format!("Workspace #{number} - {title}"));
                 match std::fs::create_dir(&candidate) {
                     Ok(()) => break candidate,
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { canvas, centerOn, here, removeCard } from "./canvas.svelte";
-  import { spaceName } from "./spaces";
+  import { canvas, removeWorkspace, renameWorkspace, switchSpace } from "./canvas.svelte";
+  import { chatsIn } from "./spaces";
   import Curtain from "./Curtain.svelte";
   import Icon from "./Icon.svelte";
   import { projectById, projects } from "./projects.svelte";
@@ -13,17 +13,23 @@
   import { profile } from "./profile.svelte";
   import { account, openLogin } from "./account.svelte";
   import { PROVIDER_INFO } from "./providers";
-  import { startChat } from "./start";
+  import { startWorkspace } from "./start";
   import { openSettings, showCanvas, showHome, toggleSidebar, ui } from "./ui.svelte";
   import { usage } from "./usage.svelte";
 
+
+  /** Al editar el nombre, el campo toma el foco con el texto seleccionado. */
+  function focusSelect(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
 
   onMount(() => {
     if (!connections.loaded) refreshConnections();
   });
 
-  const chatCards = $derived(here().filter((c) => c.kind === "chat"));
-  const spaceTitle = $derived(spaceName(canvas.space));
+  const workspaces = $derived(canvas.workspaces);
+  let renaming = $state<string | null>(null);
   const collapsed = $derived(ui.sidebarCollapsed);
 
   // La sección de relevo se pliega; se recuerda la elección.
@@ -61,10 +67,13 @@
     return { text: five ? `${Math.round(five.fraction * 100)}% usado` : "Lista", tone: "ok" };
   }
 
-  function openChat(id: string) {
+  function openWorkspace(id: string) {
     showCanvas();
-    centerOn(id);
+    switchSpace(id);
   }
+
+  const busyIn = (space: string) => canvas.cards.some((c) => c.space === space && c.busy);
+  const providerIn = (space: string) => canvas.cards.find((c) => c.space === space && c.kind === "chat")?.ai?.provider ?? "claude";
 
   const onHome = $derived(ui.screen === "home");
   const userAction = () => (account.user || !account.configured ? openSettings("perfil") : openLogin());
@@ -88,19 +97,19 @@
       <Icon name="home" size="1.05rem" /><span class="lbl">Inicio</span>
     </button>
     <button class="nav" aria-current={!onHome && ui.view !== "settings" ? "page" : undefined} onclick={showCanvas} title="Lienzo">
-      <Icon name="canvas" size="1.05rem" /><span class="lbl">Lienzo{#if canvas.space !== "general"}: {spaceTitle}{/if}</span>
-      {#if chatCards.length && !collapsed}<span class="count">{chatCards.length}</span>{/if}
+      <Icon name="canvas" size="1.05rem" /><span class="lbl">Lienzo</span>
+      {#if workspaces.length && !collapsed}<span class="count">{workspaces.length}</span>{/if}
     </button>
     {#if collapsed}
       <button class="nav" onclick={() => (ui.paletteOpen = true)} title="Buscar (Ctrl+K)" aria-label="Buscar"><Icon name="search" size="1.05rem" /></button>
-      <button class="nav" onclick={() => startChat("", null)} title="Nuevo chat (N)" aria-label="Nuevo chat"><Icon name="new-chat" size="1.05rem" /></button>
+      <button class="nav" onclick={() => startWorkspace()} title="Nuevo workspace" aria-label="Nuevo workspace"><Icon name="new-chat" size="1.05rem" /></button>
     {/if}
   </nav>
 
   {#if !collapsed}
     <div class="body">
       <div class="tabs" role="tablist" aria-label="Contenido de la barra lateral">
-        {#each [["chats", "Chats"], ["projects", "Proyectos"], ["files", "Archivos"]] as [id, label] (id)}
+        {#each [["chats", "Workspaces"], ["projects", "Proyectos"], ["files", "Archivos"]] as [id, label] (id)}
           <button
             role="tab"
             aria-selected={ui.sidebarTab === id}
@@ -115,26 +124,43 @@
           <FilesPanel />
         {:else if ui.sidebarTab === "projects"}
           <ProjectsPanel />
-        {:else if chatCards.length === 0}
+        {:else if workspaces.length === 0}
           <div class="empty">
-            <p>{canvas.space === "general" ? "Todavía no hay chats." : `Todavía no hay chats en ${spaceTitle}.`}</p>
-            <button class="btn sm" onclick={() => startChat("", null)}><Icon name="plus" size="0.9rem" />Nuevo chat</button>
+            <p>Todavía no hay workspaces.</p>
+            <button class="btn sm" onclick={() => startWorkspace()}><Icon name="plus" size="0.9rem" />Nuevo workspace</button>
             <button class="link imp" onclick={() => (ui.importOpen = true)}>Importar un chat</button>
           </div>
         {:else}
           <ul class="chats">
-            {#each chatCards as c (c.id)}
-              {@const proj = projectById(c.projectId)}
+            {#each workspaces as w (w.id)}
+              {@const proj = projectById(w.projectId)}
+              {@const n = chatsIn(w.id)}
               <li in:rise={{ x: -6, y: 0, duration: 170 }} out:rise={{ x: -6, y: 0, duration: 120 }}>
-                <button class="chat" class:current={canvas.focusId === c.id && !onHome} aria-current={canvas.focusId === c.id} onclick={() => openChat(c.id)}>
-                  {#if c.busy}<span class="activity on" aria-hidden="true"></span>{:else}<span class="pdot" data-p={c.ai?.provider ?? "claude"} aria-hidden="true"></span>{/if}
-                  <span class="name">{c.title}</span>
-                  {#if c.busy}<span class="tag">Trabajando</span>{:else if proj}<span class="tag" title={proj.path}>{proj.name}</span>{/if}
-                </button>
-                <button class="close icon-btn sm" onclick={() => removeCard(c.id)} aria-label="Cerrar {c.title}" title="Cerrar el chat (su historial se guarda)"><Icon name="x" size="0.85rem" /></button>
+                {#if renaming === w.id}
+                  <input
+                    class="input rename"
+                    aria-label="Nombre del workspace"
+                    value={w.name}
+                    maxlength="40"
+                    use:focusSelect
+                    onblur={() => (renaming = null)}
+                    onkeydown={(e) => {
+                      if (e.key === "Enter") { renameWorkspace(w.id, e.currentTarget.value); renaming = null; }
+                      else if (e.key === "Escape") renaming = null;
+                    }}
+                  />
+                {:else}
+                  <button class="chat" class:current={canvas.space === w.id && !onHome} aria-current={canvas.space === w.id} onclick={() => openWorkspace(w.id)} ondblclick={() => (renaming = w.id)} title="Doble clic para renombrar">
+                    {#if busyIn(w.id)}<span class="activity on" aria-hidden="true"></span>{:else}<span class="pdot" data-p={providerIn(w.id)} aria-hidden="true"></span>{/if}
+                    <span class="name">{w.name}</span>
+                    {#if busyIn(w.id)}<span class="tag">Trabajando</span>{:else}<span class="tag" title={proj?.path}>{n === 1 ? "1 chat" : `${n} chats`}</span>{/if}
+                  </button>
+                {/if}
+                <button class="close icon-btn sm" onclick={() => removeWorkspace(w.id)} aria-label="Cerrar {w.name}" title="Cerrar el workspace (su historial se guarda en su carpeta)"><Icon name="x" size="0.85rem" /></button>
               </li>
             {/each}
           </ul>
+          <button class="link imp" onclick={() => startWorkspace()}><Icon name="plus" size="0.85rem" />Nuevo workspace</button>
           <button class="link imp" onclick={() => (ui.importOpen = true)}><Icon name="import" size="0.85rem" />Importar un chat</button>
         {/if}
       </div>
@@ -179,6 +205,11 @@
 </aside>
 
 <style>
+  .rename {
+    height: var(--control-sm);
+    flex: 1;
+    min-width: 0;
+  }
   aside {
     display: flex;
     flex-direction: column;

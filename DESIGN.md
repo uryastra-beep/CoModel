@@ -32,7 +32,8 @@ Radios: `--radius-sm` 4, `--radius` 6, `--radius-lg` 10, `--radius-xl` 14 px. Al
 
 ## Estructura
 
-- Barra lateral plegable (Ctrl+B) con proyectos, chats, y al pie el perfil (foto o inicial) y Ajustes. Barra superior con una sola acción primaria, lienzo infinito con controles de zoom flotantes, barra de estado.
+- Barra lateral plegable (Ctrl+B) con workspaces, proyectos, archivos, y al pie el perfil (foto o inicial) y Ajustes. Barra superior con una sola acción primaria, lienzo infinito con controles de zoom flotantes, barra de estado.
+- **Workspace** es la unidad de trabajo: un lienzo propio con varios chats (tarjetas) que comparten una carpeta y una memoria. La barra lateral lista workspaces, no chats; un solo workspace agrupa todos sus chats. Cada uno tiene su vista (desplazamiento y zoom) y su carpeta automática (`CoModel/Chats/Workspace #n`), que se crea al enviar el primer mensaje. Los de otros workspaces siguen vivos aunque no se vean.
 - Inicio (`Home`): saludo grande centrado y, debajo, el cuadro para escribir. Sin tarjetas decorativas.
 - Paleta de comandos (Ctrl+K) para ir a cualquier chat, proyecto o ajuste.
 - Ajustes (Ctrl+,) en un diálogo con secciones: Perfil, Proyecto, IAs, Uso, Apariencia. Cada página usa las filas `.s-row` (etiqueta y explicación a la izquierda, control a la derecha).

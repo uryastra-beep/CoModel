@@ -696,7 +696,7 @@ export async function moveChatWorkspace(chatId: string, fromProjectId: string | 
 /** Workspace propio por defecto dentro de CoModel/Chats. Es estable para el id del chat. */
 export async function createChatWorkspace(chatId: string, title: string): Promise<Project> {
   if (inTauri) return invoke<Project>("create_chat_workspace", { chatId, title });
-  return openFolder(`/CoModel/Chats/Chat #${Date.now()} - ${title.replace(/[\\/]/g, "_")}`);
+  return openFolder(`/CoModel/Chats/Workspace #${Date.now()} - ${title.replace(/[\\/]/g, "_")}`);
 }
 
 export interface ChatGPTAccount { id: string; label: string; active: boolean; connected: boolean }

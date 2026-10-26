@@ -11,7 +11,7 @@
   import { ms } from "./motion";
   import { profile } from "./profile.svelte";
   import { openFolder, projects } from "./projects.svelte";
-  import { startChat } from "./start";
+  import { startWorkspace } from "./start";
   import { openSettings, showCanvas, ui } from "./ui.svelte";
   import { fade } from "svelte/transition";
 
@@ -44,11 +44,11 @@
 
   const hour = new Date().getHours();
   const greeting = hour < 6 ? "Buenas noches" : hour < 13 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";
-  const chats = $derived(canvas.cards.filter((c) => c.kind === "chat").length);
+  const workspaces = $derived(canvas.workspaces.length);
 
   function submit() {
     if (!text.trim()) return;
-    startChat(text, projectId, ai);
+    startWorkspace(text, projectId, ai);
     text = "";
   }
 
@@ -135,8 +135,8 @@
     <div class="under">
       <FolderMenu {projectId} locked={false} up={false} onchange={(id) => (projectId = id)} />
       <span class="grow"></span>
-      {#if chats > 0}
-        <button class="link quiet" onclick={showCanvas}>Volver a tus chats ({chats})</button>
+      {#if workspaces > 0}
+        <button class="link quiet" onclick={showCanvas}>Volver a tus workspaces ({workspaces})</button>
       {/if}
       <button class="link quiet" onclick={() => (ui.importOpen = true)}>Importar un chat</button>
     </div>

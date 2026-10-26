@@ -11,7 +11,7 @@
   import { account, loadAccount } from "./lib/account.svelte";
   import { canvas, here, openPanel, switchSpace, syncLinkedWorkspaces, layoutSnapshot, loadLayout, saveLayout } from "./lib/canvas.svelte";
   import Menu from "./lib/Menu.svelte";
-  import { spaceChoices } from "./lib/spaces";
+  import { workspaceChoices } from "./lib/spaces";
   import { loadProjects, projects } from "./lib/projects.svelte";
   import { startChat } from "./lib/start";
   import { onMount } from "svelte";
@@ -25,7 +25,7 @@
     loadAccount();
     // Primero los proyectos (para saber cuáles siguen existiendo) y luego el lienzo guardado.
     loadProjects().then(async () => {
-      loadLayout((id) => projects.list.some((p) => p.id === id));
+      loadLayout((id) => projects.list.find((p) => p.id === id)?.name ?? null);
       await syncLinkedWorkspaces();
     });
     // Antes de cerrar o recargar se guarda el lienzo.
@@ -81,8 +81,12 @@
         {#if onHome}
           <h1>Inicio</h1>
         {:else}
-          <h1 class="sr-only">Lienzo</h1>
-          <Menu up={false} label="Lienzo" icon="canvas" value={canvas.space} options={spaceChoices()} onchange={switchSpace} title="Cada proyecto tiene su propio lienzo" />
+          <h1 class="sr-only">Workspace</h1>
+          {#if canvas.workspaces.length}
+            <Menu up={false} label="Workspace" icon="canvas" value={canvas.space} options={workspaceChoices()} onchange={switchSpace} title="Cambiar de workspace" />
+          {:else}
+            <span class="noname">Sin workspaces</span>
+          {/if}
         {/if}
         {#if !onHome}
           <span class="meta">
@@ -121,6 +125,10 @@
 {#if ui.paletteOpen}<CommandPalette />{/if}
 
 <style>
+  .noname {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
   .shell {
     display: grid;
     grid-template-columns: 15.5rem minmax(0, 1fr);

@@ -14,7 +14,6 @@
   import Icon, { type IconName } from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import ChatImage from "./ChatImage.svelte";
-  import ChatLinks from "./ChatLinks.svelte";
   import { linkedChats } from "./canvas.svelte";
   import { cardIn, cardOut, ms, popIn, popOut, rise } from "./motion";
   import { fade } from "svelte/transition";
@@ -612,7 +611,6 @@
     {:else}
       <span class="status" title="IA y modelo de este chat">{aiLabel(ai.provider)}{#if shownModel}<span class="sep">·</span>{shownModel}{/if}</span>
     {/if}
-    <ChatLinks {card} />
     <ActionMenu label="Acciones del chat" {actions} />
     <button class="icon-btn sm" onclick={onclose} aria-label="Cerrar {card.title}" title="Cerrar (el historial se guarda)"><Icon name="x" size="0.95rem" /></button>
   </header>

@@ -1,11 +1,11 @@
 <script lang="ts">
   // Paleta de búsqueda y acciones (Ctrl+K): ir a un chat, empezar uno en un proyecto o lanzar una acción sin el ratón.
   import { onMount, tick } from "svelte";
-  import { canvas, centerOn, fitAll } from "./canvas.svelte";
+  import { canvas, centerOn, fitAll, switchSpace, workspaceById } from "./canvas.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import { ms } from "./motion";
   import { projectById, projects } from "./projects.svelte";
-  import { startChat } from "./start";
+  import { startChat, startWorkspace } from "./start";
   import { setTheme, THEMES } from "./theme";
   import { openSettings, showCanvas, showHome, toggleSidebar, ui } from "./ui.svelte";
 
@@ -28,13 +28,16 @@
 
   const items = $derived.by<Item[]>(() => {
     const list: Item[] = [];
-    for (const c of canvas.cards) {
+    for (const w of canvas.workspaces) {
+      list.push({ id: `ws-${w.id}`, group: "Workspaces", label: w.name, hint: projectById(w.projectId)?.name ?? "Sin carpeta todavía", icon: "canvas", run: () => { showCanvas(); switchSpace(w.id); } });
+    }
+    for (const c of canvas.cards.filter((c) => c.kind === "chat" || c.kind === "file")) {
       const proj = projectById(c.projectId);
       list.push({
         id: `card-${c.id}`,
         group: c.kind === "chat" ? "Chats abiertos" : "Archivos abiertos",
         label: c.title,
-        hint: c.kind === "file" ? (c.path ?? "") : (proj?.name ?? "Sin carpeta"),
+        hint: c.kind === "file" ? (c.path ?? "") : (workspaceById(c.space)?.name ?? proj?.name ?? "Sin carpeta"),
         icon: c.kind === "file" ? "file" : undefined,
         dot: c.kind === "chat" ? (c.ai?.provider ?? "claude") : undefined,
         run: () => {
@@ -44,13 +47,14 @@
       });
     }
     list.push(
-      { id: "new", group: "Acciones", label: "Nuevo chat", keys: "N", icon: "new-chat", run: () => startChat("", null) },
+      { id: "new", group: "Acciones", label: "Nuevo chat", hint: "En el workspace actual", keys: "N", icon: "new-chat", run: () => startChat("", null) },
+      { id: "new-ws", group: "Acciones", label: "Nuevo workspace", icon: "new-chat", run: () => startWorkspace() },
       { id: "home", group: "Acciones", label: "Ir a Inicio", icon: "home", run: showHome },
       { id: "canvas", group: "Acciones", label: "Ir al lienzo", icon: "canvas", run: showCanvas },
       {
         id: "fit",
         group: "Acciones",
-        label: "Encuadrar todos los chats",
+        label: "Encuadrar todos los chats del workspace",
         icon: "fit",
         run: () => {
           showCanvas();
