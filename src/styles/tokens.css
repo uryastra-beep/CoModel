@@ -1,0 +1,152 @@
+/*
+ * Tokens de diseño. Los componentes solo usan estas variables: cambiar de tema es cambiar
+ * `data-theme` en <html>.
+ *
+ * Grafito (por defecto) usa neutros casi grises con un matiz frío apenas perceptible; el violeta
+ * del logo queda para lo que importa: la acción principal, la selección y el foco. Violeta es la
+ * variante teñida para quien quiere el color de la marca en toda la interfaz. Papel es el tema claro.
+ *
+ * Capas, de abajo arriba: --bg (lienzo), --surface (barras, tarjetas), --raised (controles, bloques),
+ * --raised-2 (hover). Texto sobre cualquier capa >= 4.5:1 en los tres temas.
+ */
+:root,
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --bg: oklch(0.168 0.005 285);
+  --surface: oklch(0.2 0.006 285);
+  --raised: oklch(0.236 0.007 285);
+  --raised-2: oklch(0.272 0.008 285);
+  --line: oklch(0.32 0.009 285);
+  --line-soft: oklch(0.262 0.007 285);
+  --text: oklch(0.95 0.003 285);
+  --text-2: oklch(0.79 0.006 285);
+  --text-3: oklch(0.66 0.008 285);
+  --accent: oklch(0.77 0.12 292);
+  --accent-solid: oklch(0.57 0.19 292);
+  --accent-solid-hover: oklch(0.62 0.19 292);
+  --on-accent: oklch(0.985 0.004 292);
+  --accent-tint: oklch(0.3 0.06 292);
+  --ok: oklch(0.77 0.13 155);
+  --warn: oklch(0.82 0.12 80);
+  --danger: oklch(0.71 0.17 25);
+  --dot: oklch(0.29 0.006 285);
+  --scrim: oklch(0.1 0.004 285 / 0.62);
+  --shadow-card: 0 1px 1px oklch(0 0 0 / 0.25), 0 10px 30px -14px oklch(0 0 0 / 0.65);
+  --lift: 0 2px 4px oklch(0 0 0 / 0.25), 0 18px 40px -12px oklch(0 0 0 / 0.6);
+  /* Identidad de cada IA: solo en marcas pequeñas (punto, inicial), nunca en texto. */
+  --p-claude: oklch(0.72 0.13 48);
+  --p-codex: oklch(0.74 0.12 168);
+  --p-openrouter: oklch(0.72 0.12 262);
+  --p-gemini: oklch(0.74 0.12 225);
+  --p-other: oklch(0.7 0.02 285);
+  --syn-keyword: oklch(0.77 0.13 320);
+  --syn-string: oklch(0.79 0.12 150);
+  --syn-number: oklch(0.82 0.12 70);
+  --syn-comment: oklch(0.62 0.02 285);
+  --syn-function: oklch(0.79 0.11 245);
+  --syn-type: oklch(0.8 0.1 190);
+}
+
+[data-theme="violet"] {
+  color-scheme: dark;
+  --bg: oklch(0.165 0.014 295);
+  --surface: oklch(0.2 0.016 295);
+  --raised: oklch(0.238 0.018 295);
+  --raised-2: oklch(0.276 0.02 295);
+  --line: oklch(0.33 0.022 295);
+  --line-soft: oklch(0.268 0.018 295);
+  --text: oklch(0.95 0.008 295);
+  --text-2: oklch(0.79 0.018 295);
+  --text-3: oklch(0.67 0.022 295);
+  --accent: oklch(0.77 0.12 292);
+  --accent-solid: oklch(0.56 0.19 292);
+  --accent-solid-hover: oklch(0.61 0.19 292);
+  --on-accent: oklch(0.985 0.004 292);
+  --accent-tint: oklch(0.31 0.07 292);
+  --ok: oklch(0.77 0.13 155);
+  --warn: oklch(0.82 0.12 80);
+  --danger: oklch(0.71 0.17 25);
+  --dot: oklch(0.29 0.018 295);
+  --scrim: oklch(0.1 0.02 295 / 0.62);
+  --shadow-card: 0 1px 1px oklch(0 0 0 / 0.25), 0 10px 30px -14px oklch(0.05 0.03 295 / 0.7);
+  --lift: 0 2px 4px oklch(0 0 0 / 0.25), 0 18px 40px -12px oklch(0.05 0.03 295 / 0.65);
+  --p-claude: oklch(0.72 0.13 48);
+  --p-codex: oklch(0.74 0.12 168);
+  --p-openrouter: oklch(0.72 0.12 262);
+  --p-gemini: oklch(0.74 0.12 225);
+  --p-other: oklch(0.7 0.03 295);
+  --syn-keyword: oklch(0.77 0.13 320);
+  --syn-string: oklch(0.79 0.12 150);
+  --syn-number: oklch(0.82 0.12 70);
+  --syn-comment: oklch(0.63 0.03 295);
+  --syn-function: oklch(0.79 0.11 245);
+  --syn-type: oklch(0.8 0.1 190);
+}
+
+[data-theme="paper"] {
+  color-scheme: light;
+  --bg: oklch(0.962 0.004 285);
+  --surface: oklch(0.994 0.002 285);
+  --raised: oklch(0.966 0.004 285);
+  --raised-2: oklch(0.935 0.006 285);
+  --line: oklch(0.86 0.008 285);
+  --line-soft: oklch(0.915 0.006 285);
+  --text: oklch(0.22 0.01 285);
+  --text-2: oklch(0.39 0.01 285);
+  --text-3: oklch(0.5 0.012 285);
+  --accent: oklch(0.47 0.2 292);
+  --accent-solid: oklch(0.52 0.21 292);
+  --accent-solid-hover: oklch(0.47 0.21 292);
+  --on-accent: oklch(0.99 0.003 292);
+  --accent-tint: oklch(0.93 0.04 292);
+  --ok: oklch(0.47 0.13 155);
+  --warn: oklch(0.52 0.12 70);
+  --danger: oklch(0.52 0.19 25);
+  --dot: oklch(0.86 0.006 285);
+  --scrim: oklch(0.25 0.01 285 / 0.32);
+  --shadow-card: 0 1px 2px oklch(0.3 0.02 285 / 0.08), 0 10px 28px -14px oklch(0.3 0.02 285 / 0.22);
+  --lift: 0 2px 4px oklch(0.3 0.02 285 / 0.08), 0 18px 40px -12px oklch(0.3 0.02 285 / 0.28);
+  --p-claude: oklch(0.6 0.15 45);
+  --p-codex: oklch(0.58 0.12 168);
+  --p-openrouter: oklch(0.55 0.15 262);
+  --p-gemini: oklch(0.58 0.14 230);
+  --p-other: oklch(0.6 0.02 285);
+  --syn-keyword: oklch(0.48 0.17 320);
+  --syn-string: oklch(0.45 0.13 150);
+  --syn-number: oklch(0.5 0.13 60);
+  --syn-comment: oklch(0.55 0.02 285);
+  --syn-function: oklch(0.45 0.14 250);
+  --syn-type: oklch(0.45 0.11 190);
+}
+
+:root {
+  /* Escala tipográfica cerrada, en rem: el tamaño de texto del usuario escala toda la interfaz.
+     13 px para la interfaz, 15 px para leer conversaciones, saltos claros para títulos. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 2.25rem;
+
+  --radius-sm: 0.25rem;
+  --radius: 0.375rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+
+  /* Alturas de control: un solo vocabulario en toda la app. */
+  --control-sm: 1.625rem;
+  --control: 2rem;
+  --control-lg: 2.375rem;
+
+  --font: "Geist Variable", system-ui, sans-serif;
+  --mono: "Geist Mono Variable", ui-monospace, monospace;
+  /* Movimiento: entrar tarda más que salir; salidas con curva de aceleración. */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
+  --dur-out: 150ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --text-scale: 1;
+}

@@ -1,0 +1,103 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: calc(16px * var(--text-scale));
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* En una ventana translúcida (compositor con opacidad) WebKitGTK pinta el texto con suavizado
+   subpíxel sobre un fondo opaco y deja recuadros oscuros detrás de las letras. Una capa propia
+   para toda la interfaz fuerza el suavizado en escala de grises, que no necesita ese fondo. */
+#app {
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  font-feature-settings: "cv11", "ss01";
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+button,
+select,
+textarea,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-tint);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.35em;
+  padding: 0 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  line-height: 1.55;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text-2);
+}
+
+code,
+pre {
+  font-variant-ligatures: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* "Reducir movimiento" (Ajustes). Por defecto sigue la opción del sistema; ver theme.ts. */
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after,
+[data-motion="reduced"] ::backdrop {
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+}

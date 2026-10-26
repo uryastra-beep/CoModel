@@ -1,0 +1,361 @@
+/*
+ * Vocabulario común de controles. Un botón, un campo o un interruptor se ven igual en toda la app:
+ * los componentes usan estas clases en lugar de definir las suyas.
+ */
+
+/* ---------- Botones ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: var(--control);
+  padding: 0 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.btn:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+.btn:disabled {
+  opacity: 0.5;
+}
+.btn.sm {
+  height: var(--control-sm);
+  padding: 0 0.6rem;
+  font-size: var(--fs-xs);
+}
+.btn.lg {
+  height: var(--control-lg);
+  padding: 0 1rem;
+  font-size: var(--fs-sm);
+}
+.btn.primary {
+  border-color: transparent;
+  background: var(--accent-solid);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-solid-hover);
+}
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.btn.danger {
+  color: var(--danger);
+}
+.btn.danger:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--danger) 55%, var(--line));
+  background: color-mix(in oklch, var(--danger) 10%, var(--raised));
+}
+
+/* Botón de solo icono: siempre con aria-label y title. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.icon-btn:hover:not(:disabled),
+.icon-btn[aria-expanded="true"] {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+}
+.icon-btn.sm {
+  width: var(--control-sm);
+  height: var(--control-sm);
+}
+.icon-btn.on {
+  background: var(--raised-2);
+  color: var(--text);
+}
+
+/* Enlace dentro de un texto o una lista. */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color var(--dur-fast) var(--ease);
+}
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ---------- Campos ---------- */
+
+.input {
+  width: 100%;
+  height: var(--control);
+  padding: 0 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.input::placeholder {
+  color: var(--text-3);
+}
+.input:hover:not(:focus) {
+  border-color: color-mix(in oklch, var(--text-3) 45%, var(--line));
+}
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.input.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- Interruptor ---------- */
+
+.switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 2.1rem;
+  height: 1.2rem;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: 1rem;
+  background: var(--raised-2);
+  border: 1px solid var(--line);
+  pointer-events: none;
+  transition:
+    background-color var(--dur-base) var(--ease),
+    border-color var(--dur-base) var(--ease);
+}
+.switch .track::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0.15rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  margin-top: -0.4rem;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition:
+    transform var(--dur-base) var(--ease),
+    background-color var(--dur-base) var(--ease);
+}
+.switch input:checked + .track {
+  background: var(--accent-solid);
+  border-color: transparent;
+}
+.switch input:checked + .track::after {
+  transform: translateX(0.88rem);
+  background: var(--on-accent);
+}
+.switch input:focus-visible + .track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Marcas ---------- */
+
+/* Punto de identidad de una IA. */
+.pdot {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--p-other);
+}
+.pdot[data-p="claude"] {
+  background: var(--p-claude);
+}
+.pdot[data-p="codex"],
+.pdot[data-p="chatgpt"] {
+  background: var(--p-codex);
+}
+.pdot[data-p="openrouter"] {
+  background: var(--p-openrouter);
+}
+.pdot[data-p="gemini"] {
+  background: var(--p-gemini);
+}
+
+/* Actividad: un punto que respira mientras una IA trabaja. */
+.activity {
+  display: inline-block;
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.6;
+}
+.activity.on {
+  background: var(--accent);
+  opacity: 1;
+  animation: breathe 1.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Lista desplegable flotante (menús, selectores, paleta). */
+.popover {
+  z-index: 60;
+  padding: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift);
+}
+.popover-label {
+  padding: 0.35rem 0.55rem 0.25rem;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-3);
+}
+.popover-sep {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--line-soft);
+}
+
+/* ---------- Páginas de ajustes ---------- */
+
+.s-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.s-lead {
+  margin: 0.35rem 0 1.5rem;
+  max-width: 60ch;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.s-group {
+  margin: 0 0 1.75rem;
+}
+.s-group-title {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.s-group-desc {
+  margin: -0.3rem 0 0.7rem;
+  max-width: 60ch;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+/* Filas: etiqueta y explicación a la izquierda, control a la derecha. */
+.s-rows {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.s-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  min-height: 3.25rem;
+  padding: 0.7rem 0.95rem;
+}
+.s-row + .s-row {
+  border-top: 1px solid var(--line-soft);
+}
+.s-row-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.s-label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+.s-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  max-width: 52ch;
+}
+.s-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+}
+.s-result {
+  margin: 0.4rem 0 0;
+  font-size: var(--fs-xs);
+  color: var(--ok);
+}
+.s-result.bad {
+  color: var(--danger);
+}
+
+.pdot[data-p="chatgpt"] { background: var(--p-codex); }
