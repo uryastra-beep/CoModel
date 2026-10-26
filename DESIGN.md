@@ -4,29 +4,47 @@ Sistema visual de CoModel. Los valores viven en `src/styles/tokens.css`; este do
 
 ## Escena
 
-Una persona trabaja varias horas, por la tarde, en un portátil con la luz de la habitación baja, repartiendo trabajo entre varias IAs. Por eso el tema por defecto es oscuro, pero hay un tema claro y texto escalable: nada de esto es un "modo".
+Una persona trabaja varias horas, por la tarde, en un portátil con la luz de la habitación baja, repartiendo trabajo entre varias IAs. Es casual o desarrolladora: la interfaz debe parecer una herramienta seria, no un producto de IA. Por eso el tema por defecto es oscuro y casi gris, pero hay un tema claro y texto escalable.
 
 ## Color
 
-Estrategia **Restringida**: neutros teñidos hacia violeta (matiz 295, croma 0.01 a 0.02) y un solo acento, usado para acciones principales, selección y foco. Sin degradados, sin brillos. Texto sobre superficie con contraste de al menos 4.5:1 en los tres temas.
+Estrategia **Restringida**: neutros con un matiz apenas perceptible (matiz 285, croma 0.005 a 0.009 en Grafito) y un solo acento, usado para acciones principales, selección y foco. Sin degradados, sin brillos. Texto sobre superficie con contraste de al menos 4.5:1 en los tres temas.
 
 - `--bg` lienzo, `--surface` barras y tarjetas, `--raised` bloques del usuario y controles, `--raised-2` hover.
 - `--text`, `--text-2`, `--text-3` (el más tenue sigue siendo legible).
 - `--accent` para texto y foco, `--accent-solid` para botones.
 - Semánticos `--ok`, `--warn`, `--danger`, solo para estado (uso alto, relevo, error).
 
-Temas: Morado oscuro (por defecto), GitHub oscuro (neutros fríos), Morado claro.
+- `--accent-tint` fondo de selección, `--line` y `--line-soft` bordes, `--scrim` fondo de diálogos, `--shadow-card` y `--lift` las dos únicas sombras.
+- Identidad de cada IA (`--p-claude`, `--p-codex`, `--p-openrouter`, `--p-gemini`): solo en marcas pequeñas, como el punto `.pdot`. Nunca en texto ni en fondos grandes.
+- Colores de sintaxis `--syn-*` para el código.
+
+Temas (`data-theme` en `<html>`, elección en `comodel.theme.v2`):
+- **Grafito** (por defecto): neutros casi grises. El violeta del logo queda para la acción principal, la selección y el foco.
+- **Violeta**: los mismos tonos teñidos de violeta, para quien quiere el color de la marca en toda la interfaz.
+- **Papel**: tema claro.
 
 ## Tipografía
 
-Una sola familia, Geist, incluida en la app (funciona sin red), y Geist Mono para código y rutas. Escala cerrada en rem (12, 13, 15, 17, 22 px a tamaño normal); el usuario puede subir el texto hasta 130% y toda la interfaz escala, incluidas las tarjetas.
+Una sola familia, Geist, incluida en la app (funciona sin red), y Geist Mono para código y rutas. Escala cerrada en rem: `--fs-xs` 12, `--fs-sm` 13, `--fs-md` 15, `--fs-lg` 18, `--fs-xl` 24 y `--fs-2xl` 36 px a tamaño normal; el usuario puede subir el texto hasta 130% y toda la interfaz escala, incluidas las tarjetas.
+
+Radios: `--radius-sm` 4, `--radius` 6, `--radius-lg` 10, `--radius-xl` 14 px. Alturas de control: `--control-sm` 26, `--control` 32, `--control-lg` 38 px.
 
 ## Estructura
 
-- Barra lateral fija (proyecto, chats, tema y tamaño de texto), barra superior con una sola acción primaria, lienzo, barra de estado.
+- Barra lateral plegable (Ctrl+B) con proyectos, chats, y al pie el perfil (foto o inicial) y Ajustes. Barra superior con una sola acción primaria, lienzo infinito con controles de zoom flotantes, barra de estado.
+- Inicio (`Home`): saludo grande centrado y, debajo, el cuadro para escribir. Sin tarjetas decorativas.
+- Paleta de comandos (Ctrl+K) para ir a cualquier chat, proyecto o ajuste.
+- Ajustes (Ctrl+,) en un diálogo con secciones: Perfil, Proyecto, IAs, Uso, Apariencia. Cada página usa las filas `.s-row` (etiqueta y explicación a la izquierda, control a la derecha).
 - Las tarjetas de chat son las únicas "cajas": borde de 1 px, sin sombra salvo al arrastrar. Dentro no hay más tarjetas ni burbujas.
 - El texto del chat es una transcripción: etiqueta pequeña ("Tú", "Claude"), texto a 15 px, el turno del usuario sobre una banda tenue.
+- **Selector de IA por chat** (`AIPicker`): primero la IA (Claude, Codex, ChatGPT, OpenRouter) y, según cuál sea, su modelo, esfuerzo y modo. Cada IA da su propia lista y recuerda lo último que se usó con ella. Una IA sin conectar no se elige: lleva a Ajustes.
+- Comandos con barra en el chat: `/compact`, `/clear`, `/memory`, `/help`.
 - Estado de las IAs: uso (5 h, 7 d) en la barra de estado, contexto junto al botón de enviar, relevos como una línea divisoria en la transcripción.
+
+## Controles comunes
+
+Un botón, un campo o un interruptor se ven igual en toda la app. Los componentes usan las clases de `src/styles/controls.css` en lugar de definir las suyas: `.btn` (con `.sm`, `.lg`, `.primary`, `.ghost`, `.danger`), `.icon-btn`, `.link`, `.input`, `.switch`, `.pdot`, `.activity`, `.popover` y las `.s-*` de los ajustes. Menús (`Menu`, `ActionMenu`), diálogos (`Dialog`) y el avatar (`Avatar`) son componentes compartidos; un control nuevo se añade ahí, no dentro de una pantalla.
 
 ## Iconos
 
@@ -38,7 +56,7 @@ Una sola familia, Geist, incluida en la app (funciona sin red), y Geist Mono par
 
 ## Lenguaje
 
-Palabras llanas ("Contexto", "Esfuerzo", "Aceptar manualmente") con una explicación en cada opción de menú. Las herramientas se muestran como acciones ("Leyó un archivo", "Cambió src/app.ts").
+Español llano, sin guiones largos. Palabras llanas ("Contexto", "Esfuerzo", "Aceptar manualmente") con una explicación en cada opción de menú. Las herramientas se muestran como acciones ("Leyó un archivo", "Cambió src/app.ts").
 
 ## Movimiento
 
