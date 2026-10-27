@@ -1,6 +1,6 @@
 // Estado del lienzo: tarjetas y vista (desplazamiento y zoom). Es de la ventana entera, no de un componente.
 import type { ChatAI } from "./ai.svelte";
-import { closeChat, createChatWorkspace, moveChatWorkspace } from "./backend";
+import { closeChat, createChatWorkspace, moveChatWorkspace, termClose } from "./backend";
 import { touchProject, projects } from "./projects.svelte";
 import { reducedMotion } from "./theme";
 
@@ -18,7 +18,7 @@ export interface Card {
   /** En qué lienzo vive: `general` o el id de un proyecto. */
   space: string;
   /** Un chat o un archivo abierto en el editor. */
-  kind: "chat" | "file" | "files" | "code";
+  kind: "chat" | "file" | "files" | "code" | "terminal";
   workspacePending?: boolean;
   content?: string;
   language?: string;
@@ -187,6 +187,7 @@ export function removeCard(id: string) {
   canvas.cards.splice(i, 1);
   if (canvas.focusId === id) canvas.focusId = here().slice(-1)[0]?.id ?? null;
   if (kind === "chat") void closeChat(id).catch(() => {});
+  if (kind === "terminal") void termClose(id).catch(() => {});
 }
 
 export function focusCard(id: string) {
@@ -527,13 +528,14 @@ export function loadLayout(projectName: (projectId: string) => string | null) {
 }
 
 /** Paneles independientes; el selector de archivos no depende del chat enfocado. */
-export function openPanel(kind: "files" | "code", projectId: string | null = null, content = "", language = "txt") {
+export function openPanel(kind: "files" | "code" | "terminal", projectId?: string | null, content = "", language = "txt") {
   const card = addCard(undefined, projectId);
   card.kind = kind;
-  card.title = kind === "files" ? "Archivos" : `Código.${({ javascript: "js", typescript: "ts", python: "py", rust: "rs", bash: "sh" } as Record<string, string>)[language] ?? language}`;
+  card.title = kind === "terminal" ? "Terminal" : kind === "files" ? "Archivos" : `Código.${({ javascript: "js", typescript: "ts", python: "py", rust: "rs", bash: "sh" } as Record<string, string>)[language] ?? language}`;
   card.content = content;
   card.language = language;
-  card.w = Math.round((kind === "files" ? 24 : 38) * remPx());
+  card.w = Math.round((kind === "files" ? 24 : kind === "terminal" ? 44 : 38) * remPx());
+  if (kind === "terminal") card.h = Math.round(26 * remPx());
   return card;
 }
 

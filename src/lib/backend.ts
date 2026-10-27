@@ -34,9 +34,22 @@ export type Answer =
   | { kind: "deny"; message?: string }
   | { kind: "answers"; answers: Record<string, string> };
 
+/** Un archivo que la IA entregó en su mensaje (core/src/outputs.rs). `path` es relativa a la carpeta de trabajo. */
+export interface OutFile {
+  path: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** `image` si se puede mostrar; `file` para el resto. */
+  kind: "image" | "file";
+  /** `provider`: la IA lo envió directamente. `workspace`: lo escribió en la carpeta de trabajo. */
+  origin: "provider" | "workspace";
+}
+
 export type UiEvent =
   | { kind: "Provider"; provider: string; event: ProviderEvent }
-  | { kind: "Handoff"; from: string; to: string; reason: string };
+  | { kind: "Handoff"; from: string; to: string; reason: string }
+  | { kind: "Outputs"; provider: string; files: OutFile[]; rejected: string[] };
 
 export type ChatEvent = UiEvent & { chat_id: string };
 
@@ -94,7 +107,8 @@ async function mockSend(chatId: string, text: string, chosen = "claude", model: 
   const emit = (provider: string, event: ProviderEvent) =>
     mockListeners.forEach((l) => l({ chat_id: chatId, kind: "Provider", provider: provider === "claude" ? chosen : provider, event }));
   const reply = (p: string) =>
-    `Respuesta simulada de ${p}.\n\nTu mensaje fue: **${text}**\n\n- Primer punto con \`código\`\n- Segundo punto\n\n\`\`\`ts\nconst listo = true;\n\`\`\``;
+    `Respuesta simulada de ${p}.\n\nTu mensaje fue: **${text}**\n\n- Primer punto con \`código\`\n- Segundo punto\n\n\`\`\`ts\nconst listo = true;\n\`\`\`` +
+    (/bloques/i.test(text) ? '\n\nListo, aquí tienes los archivos:\n\n```html file="web/index.html"\n<h1>Hola</h1>\n```\n\n```css file="web/estilo.css"\nh1 { color: rebeccapurple; }\n```' : "");
 
   emit("claude", { type: "Started", data: { session_id: "mock", model: chosen === "codex" ? null : (model ?? "claude-haiku-5-5"), mode: "default" } });
   await sleep(500);
@@ -121,6 +135,31 @@ async function mockSend(chatId: string, text: string, chosen = "claude", model: 
       },
     });
     await ask(id);
+    return reply("Claude");
+  }
+  if (/archivo|adjunto|zip/i.test(text)) {
+    // Una imagen de muestra: en el navegador la ruta es una URL de datos para poder verla sin la app.
+    const canvas = document.createElement("canvas");
+    canvas.width = 240; canvas.height = 140;
+    const g = canvas.getContext("2d")!;
+    const grad = g.createLinearGradient(0, 0, 240, 140);
+    grad.addColorStop(0, "#7c5cff"); grad.addColorStop(1, "#ff8a4c");
+    g.fillStyle = grad; g.fillRect(0, 0, 240, 140);
+    const png = canvas.toDataURL("image/png");
+    emit("claude", { type: "Text", data: "Te dejo la gráfica y el paquete con todo." });
+    mockListeners.forEach((l) =>
+      l({
+        chat_id: chatId,
+        kind: "Outputs",
+        provider: chosen,
+        files: [
+          { path: png, name: "grafica.png", mime: "image/png", size: 4096, kind: "image", origin: "provider" },
+          { path: "entrega.zip", name: "entrega.zip", mime: "application/zip", size: 2457600, kind: "file", origin: "workspace" },
+        ],
+        rejected: ["secreto.txt: está fuera de la carpeta de trabajo"],
+      }),
+    );
+    emit("claude", { type: "Finished" });
     return reply("Claude");
   }
   if (/l[ií]mite/i.test(text)) {
@@ -162,12 +201,37 @@ export interface StoredMessage {
   content: string;
   provider: string | null;
   attachments?: string[];
+  /** Archivos que la IA entregó en este mensaje (solo asistentes). */
+  outputs?: OutFile[];
 }
 
 /** La conversación guardada de un chat, para volver a mostrarla al reabrir. */
 export async function chatHistory(projectId: string | null, chatId: string): Promise<StoredMessage[]> {
   if (!inTauri) return [];
   return invoke<StoredMessage[]>("chat_history", { projectId, chatId });
+}
+
+/** Abre un archivo entregado por la IA con la aplicación del sistema, o lo muestra en su carpeta. */
+export async function openOutput(projectId: string | null, file: OutFile, reveal = false): Promise<void> {
+  if (!inTauri) throw "Abrir archivos está disponible en la app de escritorio.";
+  await invoke("open_output", { projectId, path: file.path, reveal });
+}
+
+/** Guarda una copia del archivo donde elija el usuario. Devuelve `false` si cancela. */
+export async function downloadOutput(projectId: string | null, file: OutFile): Promise<boolean> {
+  if (!inTauri) {
+    if (!file.path.startsWith("data:")) throw "Descargar archivos está disponible en la app de escritorio.";
+    const a = document.createElement("a");
+    a.href = file.path;
+    a.download = file.name;
+    a.click();
+    return true;
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const dest = await save({ title: "Guardar archivo", defaultPath: file.name });
+  if (!dest) return false;
+  await invoke("save_output", { projectId, path: file.path, dest });
+  return true;
 }
 
 export async function answerInteraction(requestId: string, answer: Answer): Promise<void> {
@@ -198,6 +262,64 @@ export async function onChatEvent(cb: Listener): Promise<() => void> {
     return () => mockListeners.delete(cb);
   }
   return listen<ChatEvent>("comodel://event", (e) => cb(e.payload));
+}
+
+// ---------- Archivos que entrega una IA ----------
+
+export interface GeneratedFile {
+  path: string;
+  content: string;
+}
+
+/** Guarda un zip con los archivos donde el usuario elija. Devuelve la ruta, o `null` si cancela. */
+export async function saveGeneratedZip(files: GeneratedFile[], name = "archivos.zip"): Promise<string | null> {
+  if (!inTauri) throw new Error("El zip solo se puede crear en la app de escritorio.");
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({ title: "Guardar el zip", defaultPath: name, filters: [{ name: "Zip", extensions: ["zip"] }] });
+  if (!path) return null;
+  await invoke("write_generated_zip", { path, files });
+  return path;
+}
+
+export interface SaveReport {
+  written: string[];
+  skipped: string[];
+}
+
+/** Guarda los archivos en la carpeta del proyecto sin sobrescribir los que ya existen. */
+export async function saveGeneratedFiles(projectId: string | null, files: GeneratedFile[]): Promise<SaveReport> {
+  if (!inTauri) throw new Error("Guardar en la carpeta solo funciona en la app de escritorio.");
+  return invoke<SaveReport>("save_generated_files", { projectId, files });
+}
+
+// ---------- Terminal ----------
+// Solo existe en la app de escritorio: un navegador no puede abrir un shell.
+
+export const terminalAvailable = inTauri;
+
+export async function termOpen(id: string, projectId: string | null, cols: number, rows: number): Promise<void> {
+  await invoke("term_open", { id, projectId, cols, rows });
+}
+export async function termWrite(id: string, data: string): Promise<void> {
+  await invoke("term_write", { id, data });
+}
+export async function termResize(id: string, cols: number, rows: number): Promise<void> {
+  await invoke("term_resize", { id, cols, rows });
+}
+export async function termClose(id: string): Promise<void> {
+  if (inTauri) await invoke("term_close", { id });
+}
+
+export interface TermEvent {
+  id: string;
+  /** Salida del shell en base64. */
+  data: string | null;
+  exit: boolean;
+}
+
+export async function onTermEvent(cb: (e: TermEvent) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  return listen<TermEvent>("comodel://term", (e) => cb(e.payload));
 }
 
 // ---------- Conexiones y uso ----------
@@ -584,7 +706,7 @@ export async function accountSignOut(): Promise<void> {
 export async function importChat(projectId: string | null, chatId: string, url: string): Promise<{ title: string; count: number }> {
   if (!inTauri) {
     await sleep(700);
-    if (!/^https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai)\/share\//.test(url.trim())) throw "Ese enlace no parece un chat compartido de ChatGPT (chatgpt.com/share/...) ni de Claude (claude.ai/share/...).";
+    if (!/^https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai)\/(share|s)\//.test(url.trim())) throw "Ese enlace no parece un chat compartido de ChatGPT (chatgpt.com/share/... o chatgpt.com/s/...) ni de Claude (claude.ai/share/...).";
     return { title: "Chat importado", count: 6 };
   }
   return invoke("import_chat", { projectId, chatId, url });

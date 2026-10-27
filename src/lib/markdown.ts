@@ -25,7 +25,7 @@ export type Block =
   | { t: "quote"; inl: Inline[] }
   | { t: "hr" }
   | { t: "table"; head: Inline[][]; rows: Inline[][][]; align: ("left" | "center" | "right" | null)[] }
-  | { t: "code"; lang: string; v: string };
+  | { t: "code"; lang: string; v: string; /** Ruta del archivo, si la IA lo entrega para guardar (```lang file="ruta"). */ file?: string };
 
 /** Solo enlaces web y de correo; cualquier otro esquema se queda como texto. */
 export function safeHref(href: string): string | null {
@@ -116,13 +116,13 @@ export function parseMarkdown(src: string): Block[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    const fence = line.match(/^\s*```\s*([\w+#.-]*)\s*$/);
+    const fence = line.match(/^\s*```\s*([\w+#.-]*)(?:\s+file="([^"\n]{1,200})")?\s*$/);
     if (fence) {
       flushAll();
       const body: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]);
-      blocks.push({ t: "code", lang: fence[1], v: body.join("\n") });
+      blocks.push({ t: "code", lang: fence[1], v: body.join("\n"), ...(fence[2] ? { file: fence[2] } : {}) });
       continue;
     }
 

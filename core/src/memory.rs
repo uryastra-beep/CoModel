@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS messages (
     interrupted INTEGER NOT NULL DEFAULT 0,
     chat TEXT NOT NULL DEFAULT '',
     boundary INTEGER NOT NULL DEFAULT 0,
-    attachments TEXT NOT NULL DEFAULT '[]'
+    attachments TEXT NOT NULL DEFAULT '[]',
+    outputs TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
@@ -176,6 +177,7 @@ impl Memory {
         let _ = conn.execute("ALTER TABLE messages ADD COLUMN chat TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE messages ADD COLUMN boundary INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'", []);
+        let _ = conn.execute("ALTER TABLE messages ADD COLUMN outputs TEXT NOT NULL DEFAULT '[]'", []);
         // La base de datos es de esta máquina: se evita que acabe en el repositorio del usuario.
         let ignore = dir.join(".gitignore");
         if !ignore.exists() {
@@ -195,7 +197,7 @@ impl Memory {
         dest.conn.execute("ATTACH DATABASE ?1 AS incoming", params![source.to_string_lossy()])?;
         let tx = dest.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM messages WHERE chat = ?1", params![self.chat])?;
-        tx.execute("INSERT INTO messages (ts,role,provider,content,interrupted,chat,boundary,attachments) SELECT ts,role,provider,content,interrupted,chat,boundary,attachments FROM incoming.messages WHERE chat = ?1 ORDER BY id", params![self.chat])?;
+        tx.execute("INSERT INTO messages (ts,role,provider,content,interrupted,chat,boundary,attachments,outputs) SELECT ts,role,provider,content,interrupted,chat,boundary,attachments,outputs FROM incoming.messages WHERE chat = ?1 ORDER BY id", params![self.chat])?;
         tx.execute("INSERT OR REPLACE INTO chats (id,title) SELECT id,title FROM incoming.chats WHERE id = ?1", params![self.chat])?;
         // Los adjuntos relativos siguen apuntando al archivo original al cambiar de carpeta.
         let source_root = self.md_path.parent().and_then(Path::parent).unwrap_or(Path::new(""));
@@ -211,6 +213,25 @@ impl Memory {
                     _ => line.to_string(),
                 }).collect::<Vec<_>>().join("\n");
                 tx.execute("UPDATE messages SET content = ?1 WHERE id = ?2", params![format!("{text}\n\n[Archivos adjuntos]\n{paths}"), id])?;
+            }
+        }
+        // Los archivos que la IA entregó viajan con el chat: se copian a la carpeta nueva con la misma ruta relativa.
+        let outputs: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT outputs FROM messages WHERE chat = ?1 AND outputs != '[]'")?;
+            let rows = stmt.query_map(params![self.chat], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            rows
+        };
+        for json in outputs {
+            for f in serde_json::from_str::<Vec<crate::outputs::OutFile>>(&json).unwrap_or_default() {
+                if let Ok((from, rel)) = crate::outputs::resolve_in_root(source_root, &f.path) {
+                    let to = project_dir.join(&rel);
+                    if !to.exists() {
+                        if let Some(parent) = to.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        let _ = fs::copy(from, to);
+                    }
+                }
             }
         }
         // El uso pasado permanece en su base original para no contarlo dos veces en el resumen global.
@@ -260,6 +281,7 @@ impl Memory {
                     provider: r.get(1)?,
                     content: r.get(2)?,
                     attachments: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+                    outputs: Vec::new(),
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -309,12 +331,27 @@ impl Memory {
         Ok(())
     }
 
+    /// Deja los archivos que entregó la IA asociados a su último mensaje (el que se acaba de guardar).
+    pub fn attach_outputs_latest(&self, files: &[crate::outputs::OutFile]) -> Result<(), MemoryError> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let data = serde_json::to_string(files).unwrap_or_else(|_| "[]".into());
+        self.conn.execute("UPDATE messages SET outputs = ?1 WHERE id = (SELECT MAX(id) FROM messages WHERE chat = ?2 AND role = 'assistant')", params![data, self.chat])?;
+        Ok(())
+    }
+
+    /// Carpeta de trabajo a la que pertenece esta memoria.
+    pub fn root(&self) -> &Path {
+        self.md_path.parent().and_then(Path::parent).unwrap_or(Path::new(""))
+    }
+
     /// Los últimos `n` mensajes completos (los interrumpidos no cuentan), del más viejo al más nuevo.
     /// Solo cuenta lo posterior al último corte de contexto: un resumen (`/compact`, se incluye)
     /// o un borrado (`/clear`, no se incluye).
     pub fn recent_messages(&self, n: usize) -> Result<Vec<ChatMessage>, MemoryError> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, provider, content, attachments FROM messages
+            "SELECT role, provider, content, attachments, outputs FROM messages
              WHERE interrupted = 0 AND chat = ?1 AND boundary < 2
                AND id >= COALESCE((SELECT MAX(id) FROM messages WHERE chat = ?1 AND boundary > 0), 0)
              ORDER BY id DESC LIMIT ?2",
@@ -327,6 +364,7 @@ impl Memory {
                     provider: r.get(1)?,
                     content: r.get(2)?,
                     attachments: serde_json::from_str(&r.get::<_,String>(3)?).unwrap_or_default(),
+                    outputs: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default(),
                 })
             })?
             .collect::<Result<_, _>>()?;

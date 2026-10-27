@@ -15,6 +15,7 @@ pub struct Imported {
 enum Link {
     ChatGpt(String),
     Claude(String),
+    Codex(String),
 }
 
 fn parse_link(url: &str) -> Result<Link, String> {
@@ -23,12 +24,14 @@ fn parse_link(url: &str) -> Result<Link, String> {
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
     let host = host.trim_start_matches("www.");
     let id = path.split(['?', '#']).next().unwrap_or("").trim_end_matches('/');
+    let codex = id.strip_prefix("s/");
     let id = id.strip_prefix("share/").map(|s| s.strip_prefix("e/").unwrap_or(s));
-    let valid = |s: &str| !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let valid = |s: &str| !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     match (host, id) {
+        ("chatgpt.com", None) if codex.is_some_and(valid) => Ok(Link::Codex(codex.unwrap_or_default().to_string())),
         ("chatgpt.com" | "chat.openai.com", Some(i)) if valid(i) => Ok(Link::ChatGpt(i.to_string())),
         ("claude.ai", Some(i)) if valid(i) => Ok(Link::Claude(i.to_string())),
-        _ => Err("Ese enlace no parece un chat compartido de ChatGPT (chatgpt.com/share/...) ni de Claude (claude.ai/share/...).".into()),
+        _ => Err("Ese enlace no parece un chat compartido de ChatGPT (chatgpt.com/share/... o chatgpt.com/s/...) ni de Claude (claude.ai/share/...).".into()),
     }
 }
 
@@ -61,6 +64,16 @@ pub async fn import(url: &str) -> Result<Imported, String> {
                 }
             })?;
             from_chatgpt(&v)
+        }
+        Link::Codex(id) => {
+            let v = get_json(&format!("https://chatgpt.com/backend-api/wham/shared_threads/{id}")).await.map_err(|(s, _)| {
+                if s == 403 || s == 404 {
+                    "Ese chat de Codex ya no está compartido o el enlace es incorrecto.".to_string()
+                } else {
+                    "ChatGPT no dejó descargar ese chat de Codex. Inténtalo de nuevo en un rato.".to_string()
+                }
+            })?;
+            from_codex(&v)
         }
         Link::Claude(id) => {
             let v = get_json(&format!("https://claude.ai/api/chat_snapshots/{id}?rendering_mode=messages&render_all_tools=true"))
@@ -110,6 +123,28 @@ fn from_chatgpt(v: &Value) -> Result<Imported, String> {
             .unwrap_or_default();
         if !text.trim().is_empty() {
             messages.push((role == "user", text.trim().to_string()));
+        }
+    }
+    finish(v.get("title").and_then(|t| t.as_str()), "chatgpt", messages)
+}
+
+/// Un hilo compartido de Codex: turnos con mensajes del usuario y del agente. Se omiten las notas
+/// intermedias (`commentary`) y el razonamiento.
+fn from_codex(v: &Value) -> Result<Imported, String> {
+    let turns = v.get("turns").and_then(|t| t.as_array()).ok_or("Codex devolvió el chat en un formato que no entiendo.")?;
+    let mut messages = Vec::new();
+    for item in turns.iter().filter_map(|t| t.get("items").and_then(|i| i.as_array())).flatten() {
+        let text = match item.get("type").and_then(|t| t.as_str()) {
+            Some("userMessage") => item
+                .get("content")
+                .and_then(|c| c.as_array())
+                .map(|parts| parts.iter().filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text")).filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("\n"))
+                .unwrap_or_default(),
+            Some("agentMessage") if item.get("phase").and_then(|p| p.as_str()) != Some("commentary") => item.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            _ => continue,
+        };
+        if !text.trim().is_empty() {
+            messages.push((item.get("type").and_then(|t| t.as_str()) == Some("userMessage"), text.trim().to_string()));
         }
     }
     finish(v.get("title").and_then(|t| t.as_str()), "chatgpt", messages)
@@ -203,6 +238,7 @@ mod tests {
         assert!(matches!(parse_link("https://chatgpt.com/share/68a1b2c3-0000-4000-8000-123456789abc"), Ok(Link::ChatGpt(_))));
         assert!(matches!(parse_link("https://chatgpt.com/share/e/68a1b2c3-0000-4000-8000-123456789abc?x=1"), Ok(Link::ChatGpt(i)) if i.starts_with("68a1")));
         assert!(matches!(parse_link("https://claude.ai/share/abc-123"), Ok(Link::Claude(_))));
+        assert!(matches!(parse_link("https://chatgpt.com/s/cx_6adfb20c6a7081919a129a935a73f13a"), Ok(Link::Codex(i)) if i.starts_with("cx_6adf")));
         assert!(parse_link("https://evil.com/share/abc").is_err());
         assert!(parse_link("https://chatgpt.com.evil.com/share/abc").is_err());
         assert!(parse_link("chatgpt.com/share/abc").is_err());

@@ -268,6 +268,10 @@ impl Provider for ClaudeCode {
         true
     }
 
+    fn loads_user_instructions(&self) -> bool {
+        true
+    }
+
     async fn run_turn(
         &self,
         req: TurnRequest,

@@ -19,6 +19,18 @@ pub enum ProviderEvent {
     },
     /// El agente creó o editó un archivo.
     FileTouched { path: String },
+    /// La IA entrega un archivo en su respuesta. Con `data` (base64) CoModel lo guarda en
+    /// `.comodel/attachments/`; con `path` solo vale si está dentro de la carpeta de trabajo.
+    /// No llega tal cual a la interfaz: el orquestador lo valida y emite `UiEvent::Outputs`.
+    Attachment {
+        name: String,
+        #[serde(default)]
+        mime: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        data: Option<String>,
+    },
     /// Tokens usados en el turno y tamaño de la ventana de contexto, si se conoce.
     Usage {
         input_tokens: u64,

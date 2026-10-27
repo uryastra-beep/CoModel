@@ -31,6 +31,9 @@ pub struct ChatMessage {
     pub provider: Option<String>,
     #[serde(default)]
     pub attachments: Vec<PathBuf>,
+    /// Archivos que la IA entregó en este mensaje (solo asistentes).
+    #[serde(default)]
+    pub outputs: Vec<crate::outputs::OutFile>,
 }
 
 /// Un turno que CoModel pide a un proveedor. CoModel es dueño del estado:
@@ -83,6 +86,12 @@ pub trait Provider: Send + Sync {
         true
     }
 
+    /// El CLI de la IA ya carga por su cuenta las instrucciones del usuario (`~/.claude/CLAUDE.md`,
+    /// `~/.codex/AGENTS.md`), así que CoModel no debe repetirlas. Las demás las reciben en el mensaje de sistema.
+    fn loads_user_instructions(&self) -> bool {
+        false
+    }
+
     /// La IA guarda sesiones que CoModel puede continuar en el turno siguiente.
     fn resumable(&self) -> bool {
         false
@@ -99,6 +108,9 @@ pub trait Provider: Send + Sync {
         tx: mpsc::Sender<ProviderEvent>,
     ) -> Result<(), ProviderError>;
 }
+
+/// Cómo entregan archivos las IAs que no pueden escribirlos: en bloques que CoModel guarda y empaqueta en un zip.
+pub const FILE_DELIVERY_NOTE: &str = "Entrega de archivos: si el usuario pide archivos, un zip o código para descargar, escribe cada archivo COMPLETO en su propio bloque de código con esta forma exacta, con la ruta relativa en la primera línea del bloque: ```lang file=\"ruta/relativa/archivo.ext\" (y cierra con ```). CoModel guarda esos bloques y le ofrece al usuario un botón para descargarlos en un zip: no digas que no puedes crear archivos ni zips, y no digas que ya los subiste a otro sitio; di que quedan listos para descargar debajo. Usa rutas relativas sin `..` ni `/` al inicio, un bloque por archivo y sin recortar su contenido. No lo uses para código que el usuario no pidió guardar.";
 
 /// Convierte el historial + prompt en un único texto, para proveedores sin sesión.
 pub fn fold_history(req: &TurnRequest) -> String {

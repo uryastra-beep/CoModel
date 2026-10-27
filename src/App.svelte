@@ -102,7 +102,8 @@
           <kbd>Ctrl K</kbd>
         </button>
         <button class="btn sm" onclick={() => { openPanel("files", canvas.cards.find((c) => c.id === canvas.focusId)?.projectId ?? null); showCanvas(); }} title="Abrir un panel de archivos"><Icon name="folder" size="0.95rem" />Archivos</button>
-        <button class="btn sm" onclick={() => { openPanel("code"); showCanvas(); }} title="Abrir un panel de código"><Icon name="terminal" size="0.95rem" />Código</button>
+        <button class="btn sm" onclick={() => { openPanel("code"); showCanvas(); }} title="Abrir un panel de código"><Icon name="code" size="0.95rem" />Código</button>
+        <button class="btn sm" onclick={() => { openPanel("terminal"); showCanvas(); }} title="Abrir una terminal en la carpeta del workspace"><Icon name="terminal" size="0.95rem" />Terminal</button>
         <button class="btn primary sm new" onclick={() => startChat("", null)} title="Nuevo chat (N)">
           <Icon name="plus" size="0.95rem" />Nuevo chat
         </button>

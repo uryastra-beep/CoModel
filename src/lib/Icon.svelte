@@ -24,6 +24,7 @@
     | "file"
     | "import"
     | "terminal"
+    | "code"
     | "pencil"
     | "user"
     | "plug"
@@ -130,6 +131,9 @@
   {:else if name === "terminal"}
     <path d="m4 17 6-6-6-6" />
     <path d="M12 19h8" />
+  {:else if name === "code"}
+    <path d="m16 18 6-6-6-6" />
+    <path d="m8 6-6 6 6 6" />
   {:else if name === "pencil"}
     <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
   {:else if name === "user"}

@@ -6,8 +6,43 @@
   import { showCanvas } from "./ui.svelte";
   import { parseMarkdown, type Inline, type ListItem } from "./markdown";
 
-  let { text, projectId = null }: { text: string; projectId?: string | null } = $props();
+  import { saveGeneratedFiles, saveGeneratedZip, type SaveReport } from "./backend";
+  import { projectById } from "./projects.svelte";
+
+  let { text, projectId = null, live = false }: { text: string; projectId?: string | null; /** La respuesta se sigue escribiendo: aún no se pueden descargar sus archivos. */ live?: boolean } = $props();
   const blocks = $derived(parseMarkdown(text));
+  // Archivos que la IA entrega para guardar; si repite uno, vale el último.
+  const files = $derived([...new Map(blocks.flatMap((b) => (b.t === "code" && b.file ? [[b.file, { path: b.file, content: b.v }] as const] : []))).values()]);
+  let fileNote = $state<{ ok: boolean; text: string } | null>(null);
+  let fileBusy = $state(false);
+
+  async function downloadZip() {
+    fileBusy = true;
+    try {
+      const path = await saveGeneratedZip(files);
+      fileNote = path ? { ok: true, text: `Zip guardado en ${path}` } : null;
+    } catch (e) {
+      fileNote = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      fileBusy = false;
+    }
+  }
+
+  async function saveToFolder() {
+    fileBusy = true;
+    try {
+      const r: SaveReport = await saveGeneratedFiles(projectId, files);
+      const where = projectById(projectId)?.name ?? "la carpeta";
+      fileNote = {
+        ok: true,
+        text: `${r.written.length ? `Guardados en ${where}: ${r.written.join(", ")}.` : "No se guardó nada."}${r.skipped.length ? ` Ya existían y no se tocaron: ${r.skipped.join(", ")}.` : ""}`,
+      };
+    } catch (e) {
+      fileNote = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      fileBusy = false;
+    }
+  }
 
   // Qué bloque de código se acaba de copiar (para mostrar la confirmación un momento).
   let copied = $state<number | null>(null);
@@ -79,7 +114,7 @@
     {:else}
       <div class="code">
         <div class="code-head">
-          <span class="lang">{b.lang || "texto"}</span>
+          <span class="lang" class:path={b.file}>{b.file ?? (b.lang || "texto")}</span>
           <button class="copy" onclick={() => { openPanel("code", projectId, b.v, b.lang || "txt"); showCanvas(); }} title="Abrir en un panel independiente"><Icon name="terminal" size="0.85rem" />Abrir panel</button>
           <button class="copy" onclick={() => copy(i, b.v)} aria-label="Copiar código" title="Copiar código">
             {#if copied === i}<Icon name="check" size="0.85rem" />Copiado{:else}<Icon name="copy" size="0.85rem" />Copiar{/if}
@@ -89,9 +124,48 @@
       </div>
     {/if}
   {/each}
+  {#if files.length}
+    <div class="genfiles" role="group" aria-label="Archivos entregados">
+      <span class="gen-count">{files.length === 1 ? "1 archivo listo" : `${files.length} archivos listos`}</span>
+      <span class="grow"></span>
+      <button class="btn sm" onclick={downloadZip} disabled={live || fileBusy} title={live ? "Espera a que termine de escribir" : "Guardar todos los archivos en un zip"}>Descargar zip</button>
+      {#if projectId}<button class="btn sm" onclick={saveToFolder} disabled={live || fileBusy} title="Guardarlos en la carpeta del workspace, sin sobrescribir lo que ya exista">Guardar en la carpeta</button>{/if}
+    </div>
+    {#if fileNote}<p class="gen-note" class:bad={!fileNote.ok} role={fileNote.ok ? "status" : "alert"}>{fileNote.text}</p>{/if}
+  {/if}
 </div>
 
 <style>
+  .lang.path {
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+  }
+  .genfiles {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.4rem 0 0;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+  }
+  .gen-count {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .grow {
+    flex: 1;
+  }
+  .gen-note {
+    margin: 0.35rem 0 0;
+    font-size: var(--fs-xs);
+    color: var(--ok);
+    overflow-wrap: anywhere;
+  }
+  .gen-note.bad {
+    color: var(--danger);
+  }
   .md {
     font-size: var(--fs-md);
     line-height: 1.62;

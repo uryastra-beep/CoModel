@@ -3,7 +3,7 @@
   import ActionMenu, { type Action } from "./ActionMenu.svelte";
   import AIPicker from "./AIPicker.svelte";
   import { defaultsFor, effortsFor, modelLabel, modesFor, providerLabel as aiLabel } from "./ai.svelte";
-  import { answerInteraction, chatHistory, clearChat, onChatEvent, pickFiles, savePastedImage, sendMessage, stopMessage, type Answer } from "./backend";
+  import { answerInteraction, chatHistory, clearChat, onChatEvent, pickFiles, savePastedImage, sendMessage, stopMessage, type Answer, type OutFile } from "./backend";
   import type { Card } from "./canvas.svelte";
   import { bumpFiles, canvas, ensureChatWorkspace, centerOn, openFileCard, setCardAI } from "./canvas.svelte";
   import { trackPointer } from "./cardDrag";
@@ -14,6 +14,7 @@
   import Icon, { type IconName } from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import ChatImage from "./ChatImage.svelte";
+  import ChatFiles from "./ChatFiles.svelte";
   import { linkedChats } from "./canvas.svelte";
   import { cardIn, cardOut, ms, popIn, popOut, rise } from "./motion";
   import { fade } from "svelte/transition";
@@ -41,7 +42,7 @@
 
   type Item =
     | { kind: "user"; text: string; files?: Attached[] }
-    | { kind: "assistant"; provider: string; model?: string | null; text: string }
+    | { kind: "assistant"; provider: string; model?: string | null; text: string; files?: OutFile[] }
     | { kind: "log"; text: string; icon?: IconName }
     | { kind: "change"; path: string; rows: Row[]; created: boolean; memory: boolean }
     | ({ kind: "permission" } & PermissionItem)
@@ -240,7 +241,7 @@
     chatHistory(card.projectId, card.id)
       .then((msgs) => {
         if (items.length > 0 || msgs.length === 0) return;
-        items = msgs.map((m) => (m.role === "user" ? storedUser(m.content, m.attachments) : { kind: "assistant", provider: m.provider ?? "claude", text: m.content }));
+        items = msgs.map((m) => (m.role === "user" ? storedUser(m.content, m.attachments) : { kind: "assistant", provider: m.provider ?? "claude", text: m.content, files: m.outputs?.length ? m.outputs : undefined }));
         scrollDown();
       })
       .catch((e) => { canvas.projectError = String(e); });
@@ -253,6 +254,23 @@
         items.push({ kind: "handoff", from: ev.from, to: ev.to, reason: ev.reason });
         // El chat sigue con la IA del relevo: el selector lo refleja, con lo último que se usó con ella.
         if (["claude", "codex", "openrouter"].includes(ev.to)) setCardAI(card.id, { ...defaultsFor(ev.to) });
+        scrollDown();
+        return;
+      }
+      if (ev.kind === "Outputs") {
+        // Los archivos van con la respuesta de este turno, aunque la IA no los nombre en el texto.
+        const start = items.map((i) => i.kind).lastIndexOf("user");
+        let target = items.slice(start + 1).reverse().find((i) => i.kind === "assistant") as Extract<Item, { kind: "assistant" }> | undefined;
+        if (!target && ev.files.length) {
+          items.push({ kind: "assistant", provider: ev.provider, model: lastModel[ev.provider] ?? null, text: "" });
+          target = items[items.length - 1] as Extract<Item, { kind: "assistant" }>;
+        }
+        if (target) {
+          const known = new Set((target.files ?? []).map((f) => f.path));
+          target.files = [...(target.files ?? []), ...ev.files.filter((f) => !known.has(f.path))];
+        }
+        for (const r of ev.rejected) items.push({ kind: "log", text: `No se adjuntó ${r}`, icon: "alert" });
+        bumpFiles();
         scrollDown();
         return;
       }
@@ -520,9 +538,11 @@
     input.style.overflowY = input.scrollHeight > limit ? "auto" : "hidden";
   }
 
-  // Recalcular la altura del cuadro de texto cuando cambia el ancho de la tarjeta o el tamaño del texto.
+  // Recalcular la altura del cuadro de texto cuando cambia su contenido (también al vaciarlo tras enviar,
+  // cuando el valor ya se aplicó al DOM) o el ancho de la tarjeta.
   $effect(() => {
     void card.w;
+    void draft;
     resize();
   });
 
@@ -648,7 +668,8 @@
               <Icon name={copied === i ? "check" : "copy"} size="0.85rem" />
             </button>
           </div>
-          <Markdown text={item.text} projectId={card.projectId} />
+          <Markdown text={item.text} projectId={card.projectId} live={busy && i === items.length - 1} />
+          {#if item.files?.length}<ChatFiles files={item.files} projectId={card.projectId} />{/if}
         </section>
       {:else if item.kind === "change"}
         <details class="change" in:rise>

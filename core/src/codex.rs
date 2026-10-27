@@ -246,6 +246,10 @@ impl Provider for Codex {
         true
     }
 
+    fn loads_user_instructions(&self) -> bool {
+        true
+    }
+
     async fn run_turn(&self, req: TurnRequest, tx: mpsc::Sender<ProviderEvent>) -> Result<(), ProviderError> {
         if req.resume.is_none() {
             return self.run_once(req, tx).await;

@@ -3,6 +3,7 @@
   import ChatCard from "./ChatCard.svelte";
   import FileCard from "./FileCard.svelte";
   import PanelCard from "./PanelCard.svelte";
+  import TerminalCard from "./TerminalCard.svelte";
   import Icon from "./Icon.svelte";
   import { ms } from "./motion";
   import { onFileDrop } from "./backend";
@@ -132,6 +133,10 @@
           onmove={(dx, dy) => moveCard(card.id, dx, dy)}
           onresize={(dw, dh) => resizeCard(card.id, dw, dh)}
         />
+      {:else if card.kind === "terminal"}
+        <TerminalCard {card} scale={canvas.view.k} focused={canvas.focusId === card.id}
+          onfocus={() => focusCard(card.id)} onclose={() => removeCard(card.id)}
+          onmove={(dx, dy) => moveCard(card.id, dx, dy)} onresize={(dw, dh) => resizeCard(card.id, dw, dh)} />
       {:else if card.kind === "files" || card.kind === "code"}
         <PanelCard {card} scale={canvas.view.k} focused={canvas.focusId === card.id}
           onfocus={() => focusCard(card.id)} onclose={() => removeCard(card.id)}

@@ -36,9 +36,11 @@ impl OpenRouter {
 
     fn body(&self, req: &TurnRequest) -> Value {
         let mut messages = Vec::new();
-        if let Some(p) = &req.preamble {
-            messages.push(json!({"role": "system", "content": p}));
-        }
+        let system = match &req.preamble {
+            Some(p) => format!("{p}\n\n{}", crate::provider::FILE_DELIVERY_NOTE),
+            None => crate::provider::FILE_DELIVERY_NOTE.to_string(),
+        };
+        messages.push(json!({"role": "system", "content": system}));
         for m in &req.history {
             messages.push(json!({"role": m.role.as_str(), "content": m.content}));
         }

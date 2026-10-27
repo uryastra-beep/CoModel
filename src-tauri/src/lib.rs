@@ -1,6 +1,8 @@
 mod account;
 mod chatgpt_auth;
+mod generated;
 mod import;
+mod terminal;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -42,6 +44,7 @@ struct AppState {
     running: Mutex<HashMap<String, tokio::task::AbortHandle>>,
     /// Lista de modelos de OpenRouter, pedida una vez por sesión.
     openrouter_models: Mutex<Option<Vec<OpenRouterModel>>>,
+    terminals: terminal::Terminals,
 }
 
 /// Dónde trabaja un chat: la carpeta de un proyecto o el espacio general (sin carpeta).
@@ -210,6 +213,35 @@ async fn chat(state: &AppState, project_id: Option<&str>, chat_id: &str) -> Resu
     Ok(orch)
 }
 
+/// Abre una terminal en la carpeta del proyecto (o en la carpeta personal si no hay).
+#[tauri::command]
+async fn term_open(app: AppHandle, state: State<'_, AppState>, id: String, project_id: Option<String>, cols: u16, rows: u16) -> Result<(), String> {
+    if !valid_id(&id) {
+        return Err("Identificador de terminal no válido.".into());
+    }
+    let cwd = match project_id.as_deref() {
+        Some(p) => Some(workspace(&state, Some(p)).await?.path),
+        None => None,
+    };
+    state.terminals.open(std::sync::Arc::new(move |e| { let _ = app.emit(terminal::TERM_EVENT, e); }), &id, cwd, cols, rows)
+}
+
+#[tauri::command]
+async fn term_write(state: State<'_, AppState>, id: String, data: String) -> Result<(), String> {
+    state.terminals.write(&id, data.as_bytes())
+}
+
+#[tauri::command]
+async fn term_resize(state: State<'_, AppState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
+    state.terminals.resize(&id, cols, rows)
+}
+
+#[tauri::command]
+async fn term_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.terminals.close(&id);
+    Ok(())
+}
+
 /// Envía un mensaje al proveedor activo del chat. Los eventos llegan a la interfaz por
 /// `UI_EVENT` mientras el turno corre; el resultado es el texto final.
 #[tauri::command]
@@ -370,6 +402,22 @@ async fn write_document(path: String, content: String) -> Result<(), String> {
         .await.map_err(|e| e.to_string())?
 }
 
+/// Empaqueta en un zip, en la ruta elegida en el diálogo nativo, los archivos que una IA entregó en bloques de código.
+#[tauri::command]
+async fn write_generated_zip(path: String, files: Vec<generated::GenFile>) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || generated::write_zip(Path::new(&path), &files)).await.map_err(|e| e.to_string())?
+}
+
+/// Guarda esos archivos en la carpeta del proyecto, sin sobrescribir nada.
+#[tauri::command]
+async fn save_generated_files(state: State<'_, AppState>, project_id: Option<String>, files: Vec<generated::GenFile>) -> Result<generated::SaveReport, String> {
+    let ws = workspace(&state, project_id.as_deref()).await?;
+    if !ws.has_folder {
+        return Err("Este workspace todavía no tiene carpeta. Envía un mensaje para que se cree, o descarga el zip.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || generated::save_in(&ws.path, &files)).await.map_err(|e| e.to_string())?
+}
+
 /// Imágenes locales del proyecto o adjuntos elegidos por el usuario. Nunca devuelve texto ni HTML.
 #[tauri::command]
 async fn read_image(state: State<'_, AppState>, project_id: Option<String>, path: String) -> Result<String, String> {
@@ -386,6 +434,45 @@ async fn read_image(state: State<'_, AppState>, project_id: Option<String>, path
             _ => Err("Ese archivo no es una imagen.".into()),
         }
     }).await.map_err(|e| e.to_string())?
+}
+
+/// Tipos que el sistema podría ejecutar en vez de mostrar: no se abren desde el chat, solo se descargan.
+const RUNNABLE: &[&str] = &["sh", "bash", "zsh", "fish", "desktop", "exe", "bat", "cmd", "com", "msi", "scr", "ps1", "lnk", "app", "command", "appimage", "run", "jar", "vbs", "js", "py", "pl", "rb", "deb", "rpm"];
+
+/// Un archivo entregado por la IA, dentro de la carpeta de trabajo. Solo rutas relativas del workspace.
+async fn output_path(state: &AppState, project_id: Option<&str>, path: &str) -> Result<PathBuf, String> {
+    if Path::new(path).is_absolute() || path.is_empty() {
+        return Err("Ruta no válida.".into());
+    }
+    let ws = workspace(state, project_id).await?;
+    let path = path.to_string();
+    tauri::async_runtime::spawn_blocking(move || comodel_core::outputs::resolve_in_root(&ws.path, &path).map(|(full, _)| full))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Abre un archivo que la IA entregó con la aplicación del sistema, o lo muestra en su carpeta.
+#[tauri::command]
+async fn open_output(app: AppHandle, state: State<'_, AppState>, project_id: Option<String>, path: String, reveal: bool) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let full = output_path(&state, project_id.as_deref(), &path).await?;
+    if reveal {
+        return app.opener().reveal_item_in_dir(&full).map_err(|_| "No se pudo mostrar el archivo en su carpeta.".to_string());
+    }
+    let ext = full.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if RUNNABLE.contains(&ext.as_str()) {
+        return Err("Por seguridad ese tipo de archivo no se abre desde el chat. Descárgalo y ábrelo tú.".into());
+    }
+    app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|_| "No se pudo abrir el archivo con ninguna aplicación.".to_string())
+}
+
+/// Copia un archivo que la IA entregó al destino elegido en el diálogo de guardar.
+#[tauri::command]
+async fn save_output(state: State<'_, AppState>, project_id: Option<String>, path: String, dest: String) -> Result<(), String> {
+    let full = output_path(&state, project_id.as_deref(), &path).await?;
+    tauri::async_runtime::spawn_blocking(move || std::fs::copy(full, dest).map(|_| ()).map_err(|e| format!("No se pudo guardar: {e}")))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ---------- Archivos del proyecto ----------
@@ -845,11 +932,16 @@ pub fn run() {
                 interactions: Interactions::new(),
                 running: Mutex::new(HashMap::new()),
                 openrouter_models: Mutex::new(None),
+                terminals: terminal::Terminals::default(),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             send_message,
+            term_open,
+            term_write,
+            term_resize,
+            term_close,
             close_chat,
             import_chat,
             import_chat_file,
@@ -870,8 +962,12 @@ pub fn run() {
             chat_history,
             save_pasted_image,
             read_image,
+            open_output,
+            save_output,
             move_chat_workspace,
             write_document,
+            write_generated_zip,
+            save_generated_files,
             list_projects,
             create_project,
             open_folder,

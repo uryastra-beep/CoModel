@@ -42,11 +42,11 @@
 <Dialog title="Importar un chat" subtitle="Trae una conversación entera a un chat nuevo." onclose={() => (ui.importOpen = false)} width="min(28rem, 94vw)">
   {#snippet children(close)}
     <form class="body" onsubmit={(e) => { e.preventDefault(); run(close); }}>
-      <p class="lead">Pega el enlace de un chat compartido de ChatGPT o Claude. Después puedes seguir la conversación con cualquier IA.</p>
+      <p class="lead">Pega el enlace de un chat compartido de ChatGPT, Codex o Claude. Después puedes seguir la conversación con cualquier IA.</p>
       <label>
         <span>Enlace</span>
         <!-- svelte-ignore a11y_autofocus -->
-        <input class="input" bind:value={url} placeholder="https://chatgpt.com/share/…" autofocus spellcheck="false" autocomplete="off" />
+        <input class="input" bind:value={url} placeholder="https://chatgpt.com/share/… o /s/…" autofocus spellcheck="false" autocomplete="off" />
       </label>
       <div class="workspace">
         <span>Carpeta de trabajo del chat</span>

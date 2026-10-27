@@ -30,6 +30,7 @@ async fn drain(mut rx: mpsc::UnboundedReceiver<UiEvent>) {
         match ev {
             UiEvent::Provider { provider, event } => print_event(&provider, &event),
             UiEvent::Handoff { from, to, reason } => println!("=== RELEVO {from} -> {to} ({reason}) ==="),
+            UiEvent::Outputs { provider, files, rejected } => println!("[{provider}] archivos: {} ({} descartados)", files.len(), rejected.len()),
         }
     }
 }

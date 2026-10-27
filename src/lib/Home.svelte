@@ -59,7 +59,14 @@
     }
   }
 
+  // Tras enviar, `text` se vacía por código y no hay evento `input`: se vuelve a medir al cambiar el valor.
+  $effect(() => {
+    void text;
+    resize();
+  });
+
   function resize() {
+    if (!box) return;
     box.style.height = "auto";
     box.style.height = `${Math.min(box.scrollHeight, 14 * 16)}px`;
   }

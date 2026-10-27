@@ -1,7 +1,7 @@
 <script lang="ts">
   // Paleta de búsqueda y acciones (Ctrl+K): ir a un chat, empezar uno en un proyecto o lanzar una acción sin el ratón.
   import { onMount, tick } from "svelte";
-  import { canvas, centerOn, fitAll, switchSpace, workspaceById } from "./canvas.svelte";
+  import { canvas, centerOn, fitAll, openPanel, switchSpace, workspaceById } from "./canvas.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import { ms } from "./motion";
   import { projectById, projects } from "./projects.svelte";
@@ -48,6 +48,7 @@
     }
     list.push(
       { id: "new", group: "Acciones", label: "Nuevo chat", hint: "En el workspace actual", keys: "N", icon: "new-chat", run: () => startChat("", null) },
+      { id: "term", group: "Acciones", label: "Abrir una terminal", hint: "En la carpeta del workspace", icon: "terminal", run: () => { openPanel("terminal"); showCanvas(); } },
       { id: "new-ws", group: "Acciones", label: "Nuevo workspace", icon: "new-chat", run: () => startWorkspace() },
       { id: "home", group: "Acciones", label: "Ir a Inicio", icon: "home", run: showHome },
       { id: "canvas", group: "Acciones", label: "Ir al lienzo", icon: "canvas", run: showCanvas },
