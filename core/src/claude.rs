@@ -47,6 +47,9 @@ impl ClaudeCode {
         .iter()
         .map(|s| s.to_string())
         .collect();
+        if req.ephemeral {
+            a.push("--no-session-persistence".into());
+        }
         // Cada chat sigue en la misma sesión del CLI mientras se pueda.
         if let Some(r) = &req.resume {
             a.extend(["--resume".into(), r.session_id.clone()]);

@@ -1,6 +1,6 @@
 // Estado del lienzo: tarjetas y vista (desplazamiento y zoom). Es de la ventana entera, no de un componente.
 import type { ChatAI } from "./ai.svelte";
-import { closeChat, createChatWorkspace, moveChatWorkspace, termClose } from "./backend";
+import { closeChat, createChatWorkspace, moveChatWorkspace, quickTitle, suggestTitle, termClose } from "./backend";
 import { touchProject, projects } from "./projects.svelte";
 import { reducedMotion } from "./theme";
 
@@ -85,6 +85,31 @@ export function addWorkspace(name?: string, projectId: string | null = null): Wo
   canvas.workspaces.push(ws);
   switchSpace(ws.id);
   return ws;
+}
+
+/** Un chat o workspace que todavía lleva el nombre que se pone solo ("Chat 3", "Workspace 2"). */
+const isDefaultName = (t: string) => /^(Chat|Workspace) \d+$/.test(t.trim());
+
+/** Con el primer mensaje, el chat y su workspace dejan de llamarse "Chat 3" / "Workspace 2": primero un título
+ * provisional (las primeras palabras, al instante) y enseguida el que genera una IA. Lo que el usuario haya renombrado no se toca. */
+export function autoTitle(cardId: string, text: string, provider: string | null) {
+  const card = canvas.cards.find((c) => c.id === cardId && c.kind === "chat");
+  if (!card || !text.trim()) return;
+  const ws = workspaceById(card.space);
+  const nameCard = isDefaultName(card.title);
+  const nameWs = !!ws && isDefaultName(ws.name);
+  if (!nameCard && !nameWs) return;
+  const quick = quickTitle(text);
+  if (!quick) return;
+  if (nameCard) card.title = quick;
+  if (nameWs && ws) ws.name = quick;
+  void suggestTitle(text, provider)
+    .then((t) => {
+      // Si el usuario lo renombró mientras tanto, se respeta.
+      if (nameCard && card.title === quick) card.title = t.slice(0, 40);
+      if (nameWs && ws && ws.name === quick) ws.name = t.slice(0, 40);
+    })
+    .catch(() => {});
 }
 
 export function renameWorkspace(id: string, name: string) {

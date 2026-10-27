@@ -1,5 +1,5 @@
 // Qué pantalla se ve. El lienzo siempre queda montado debajo para no perder los chats.
-export type Section = "perfil" | "proyecto" | "ias" | "uso" | "apariencia" | "atajos";
+export type Section = "perfil" | "proyecto" | "ias" | "memoria" | "uso" | "apariencia" | "atajos";
 
 const SIDEBAR_KEY = "comodel.sidebarCollapsed";
 

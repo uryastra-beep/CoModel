@@ -56,6 +56,8 @@ pub struct TurnRequest {
     /// Sesión del CLI de este chat que se puede continuar. Si falla (ya no existe o no cabe más),
     /// el adaptador empieza una nueva con `history`.
     pub resume: Option<Resume>,
+    /// Tarea suelta (p. ej. poner título): la sesión no se guarda en el CLI.
+    pub ephemeral: bool,
 }
 
 /// Una sesión del CLI que ya conoce la conversación hasta cierto punto.

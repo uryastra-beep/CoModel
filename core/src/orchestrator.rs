@@ -256,6 +256,7 @@ impl Orchestrator {
                 None
             };
             let req = TurnRequest {
+                ephemeral: false,
                 resume,
                 prompt,
                 attachments: files.clone(),

@@ -2,6 +2,7 @@ mod account;
 mod chatgpt_auth;
 mod generated;
 mod import;
+mod memory_import;
 mod terminal;
 
 use std::collections::HashMap;
@@ -400,6 +401,94 @@ async fn chat_history(state: State<'_, AppState>, project_id: Option<String>, ch
 async fn write_document(path: String, content: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || std::fs::write(path, content).map_err(|e| format!("No se pudo guardar: {e}")))
         .await.map_err(|e| e.to_string())?
+}
+
+/// Fuentes de memoria que el usuario ha traído de otras IAs.
+#[tauri::command]
+async fn memory_imports() -> Result<serde_json::Value, String> {
+    let root = memory_import::root()?;
+    Ok(serde_json::json!({
+        "imports": memory_import::list_in(&root),
+        "shared_chars": memory_import::shared_chars(&root),
+        "sync_available": memory_import::find_sync().is_some(),
+    }))
+}
+
+#[tauri::command]
+async fn memory_import_get(id: String) -> Result<String, String> {
+    memory_import::get_in(&memory_import::root()?, &id)
+}
+
+/// Guarda lo que una IA contestó al prompt de memoria y vuelve a juntar la memoria compartida.
+#[tauri::command]
+async fn memory_import_save(label: String, text: String) -> Result<serde_json::Value, String> {
+    let root = memory_import::root()?;
+    let info = memory_import::save_in(&root, &label, &text)?;
+    let sync = tauri::async_runtime::spawn_blocking(memory_import::run_sync).await.map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "info": info, "sync": sync }))
+}
+
+#[tauri::command]
+async fn memory_import_delete(id: String) -> Result<memory_import::SyncReport, String> {
+    memory_import::delete_in(&memory_import::root()?, &id)?;
+    tauri::async_runtime::spawn_blocking(memory_import::run_sync).await.map_err(|e| e.to_string())
+}
+
+/// Junta otra vez la memoria de Claude, Codex y las fuentes importadas.
+#[tauri::command]
+async fn memory_sync() -> Result<memory_import::SyncReport, String> {
+    tauri::async_runtime::spawn_blocking(memory_import::run_sync).await.map_err(|e| e.to_string())
+}
+
+/// Un título corto para un chat o workspace a partir de su primer mensaje. Usa la IA más barata que esté conectada
+/// (la del chat si sirve para esto) y no deja rastro en sus sesiones. Si ninguna responde, devuelve error y la
+/// interfaz se queda con el título provisional.
+#[tauri::command]
+async fn suggest_title(text: String, provider: Option<String>) -> Result<String, String> {
+    use comodel_core::provider::TurnRequest;
+    use comodel_core::titles::{clean_title, title_prompt};
+    if text.trim().is_empty() {
+        return Err("Sin texto.".into());
+    }
+    // (IA, modelo barato). Codex no está: arrancarlo para un título gasta más de lo que vale.
+    let cheap = |id: &str| match id {
+        "claude" => Some(Some("claude-haiku-5-5")),
+        "openrouter" => Some(Some("openai/gpt-4o-mini")),
+        "chatgpt" => Some(None),
+        _ => None,
+    };
+    let mut order: Vec<String> = provider.into_iter().filter(|p| cheap(p).is_some()).collect();
+    for id in ["claude", "openrouter", "chatgpt"] {
+        if !order.iter().any(|o| o == id) {
+            order.push(id.into());
+        }
+    }
+    for id in order {
+        let Some(model) = cheap(&id) else { continue };
+        let Some(p) = make_provider(&id, false).await else { continue };
+        let req = TurnRequest { prompt: title_prompt(&text), model: model.map(String::from), ephemeral: true, ..Default::default() };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let run = tokio::spawn(async move { p.run_turn(req, tx).await });
+        let collect = async {
+            let mut out = String::new();
+            while let Some(ev) = rx.recv().await {
+                match ev {
+                    comodel_core::events::ProviderEvent::Text(t) => out.push_str(&t),
+                    comodel_core::events::ProviderEvent::LimitReached { .. } | comodel_core::events::ProviderEvent::Error(_) => return None,
+                    _ => {}
+                }
+            }
+            Some(out)
+        };
+        let got = tokio::time::timeout(std::time::Duration::from_secs(25), collect).await;
+        run.abort();
+        if let Ok(Some(out)) = got {
+            if let Some(t) = clean_title(&out) {
+                return Ok(t);
+            }
+        }
+    }
+    Err("No se pudo generar un título.".into())
 }
 
 /// Empaqueta en un zip, en la ruta elegida en el diálogo nativo, los archivos que una IA entregó en bloques de código.
@@ -967,6 +1056,12 @@ pub fn run() {
             move_chat_workspace,
             write_document,
             write_generated_zip,
+            suggest_title,
+            memory_imports,
+            memory_import_get,
+            memory_import_save,
+            memory_import_delete,
+            memory_sync,
             save_generated_files,
             list_projects,
             create_project,

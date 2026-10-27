@@ -166,6 +166,21 @@ async fn main() {
             }
             println!("sesión guardada al final: {:?}", orch.memory().session_for("claude", i64::MAX).unwrap().map(|(s, _)| s));
         }
+        Some("title") => {
+            // El título que saldría para un primer mensaje, con Claude real y sin guardar sesión.
+            use comodel_core::provider::TurnRequest;
+            let msg = args.get(1).cloned().unwrap_or_else(|| "oye ayúdame a hacer una app de recetas con login y favoritos".into());
+            let p = claude("claude");
+            let (tx, mut rx) = mpsc::channel(32);
+            let req = TurnRequest { prompt: comodel_core::titles::title_prompt(&msg), model: Some("claude-haiku-5-5".into()), ephemeral: true, ..Default::default() };
+            let run = tokio::spawn(async move { p.run_turn(req, tx).await });
+            let mut out = String::new();
+            while let Some(ev) = rx.recv().await {
+                if let ProviderEvent::Text(t) = ev { out.push_str(&t); }
+            }
+            let _ = run.await;
+            println!("bruto: {out:?}\ntítulo: {:?}", comodel_core::titles::clean_title(&out));
+        }
         Some("demo") => {
             let dir = temp_project("demo");
             // A se agota en su 2.ª llamada; B (otro Claude) debe seguir con el contexto.

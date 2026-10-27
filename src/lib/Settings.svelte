@@ -19,6 +19,7 @@
   import { account, openLogin, signOut } from "./account.svelte";
   import { rise } from "./motion";
   import SettingsAIs from "./SettingsAIs.svelte";
+  import SettingsMemory from "./SettingsMemory.svelte";
   import SettingsProject from "./SettingsProject.svelte";
   import SettingsUsage from "./SettingsUsage.svelte";
   import { TEXT_SCALES, THEMES, currentTextScale, currentTheme, reducedMotion, setReducedMotion, setTextScale, setTheme, type ThemeId } from "./theme";
@@ -27,6 +28,7 @@
   const SECTIONS: { id: Section; label: string; icon: IconName }[] = [
     { id: "perfil", label: "Perfil", icon: "user" },
     { id: "ias", label: "IAs", icon: "plug" },
+    { id: "memoria", label: "Memoria", icon: "memory" },
     { id: "proyecto", label: "Proyectos", icon: "folder" },
     { id: "uso", label: "Uso", icon: "chart" },
     { id: "apariencia", label: "Apariencia", icon: "palette" },
@@ -135,6 +137,8 @@
               <SettingsProject />
             {:else if ui.section === "ias"}
               <SettingsAIs />
+            {:else if ui.section === "memoria"}
+              <SettingsMemory />
             {:else if ui.section === "uso"}
               <SettingsUsage />
             {:else if ui.section === "apariencia"}

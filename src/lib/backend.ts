@@ -264,6 +264,109 @@ export async function onChatEvent(cb: Listener): Promise<() => void> {
   return listen<ChatEvent>("comodel://event", (e) => cb(e.payload));
 }
 
+// ---------- Memoria importada de otras IAs ----------
+
+export interface MemoryImport {
+  id: string;
+  label: string;
+  chars: number;
+  /** Segundos desde 1970. */
+  updated: number;
+}
+
+export interface MemoryState {
+  imports: MemoryImport[];
+  /** Tamaño del texto compartido que leen las IAs, si existe. */
+  shared_chars: number | null;
+  /** Está instalado el programa que junta la memoria (`ai-memory-sync`). */
+  sync_available: boolean;
+}
+
+export interface SyncReport {
+  available: boolean;
+  ok: boolean;
+  message: string;
+}
+
+// En el navegador la memoria importada se guarda en localStorage para poder probar el flujo.
+const MOCK_MEMORY = "comodel.mock.memory";
+const mockMemory = (): Record<string, { text: string; updated: number }> => {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_MEMORY) ?? "{}");
+  } catch {
+    return {};
+  }
+};
+const mockLabel = (id: string) => ({ chatgpt: "ChatGPT", gemini: "Gemini" } as Record<string, string>)[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
+
+export async function memoryState(): Promise<MemoryState> {
+  if (!inTauri) {
+    const m = mockMemory();
+    return { imports: Object.entries(m).map(([id, v]) => ({ id, label: mockLabel(id), chars: v.text.length, updated: v.updated })), shared_chars: 16000, sync_available: true };
+  }
+  return invoke<MemoryState>("memory_imports");
+}
+
+export async function memoryImportText(id: string): Promise<string> {
+  if (!inTauri) return mockMemory()[id]?.text ?? "";
+  return invoke<string>("memory_import_get", { id });
+}
+
+export async function importMemory(label: string, text: string): Promise<{ info: MemoryImport; sync: SyncReport }> {
+  if (!inTauri) {
+    const id = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!id) throw new Error("Ponle un nombre a la fuente (por ejemplo ChatGPT).");
+    if (!text.trim()) throw new Error("Pega primero lo que te dio la IA.");
+    const m = mockMemory();
+    m[id] = { text: text.trim(), updated: Math.floor(Date.now() / 1000) };
+    localStorage.setItem(MOCK_MEMORY, JSON.stringify(m));
+    return { info: { id, label: mockLabel(id), chars: text.trim().length, updated: m[id].updated }, sync: { available: true, ok: true, message: "shared.md: 16000 bytes (simulado)" } };
+  }
+  return invoke("memory_import_save", { label, text });
+}
+
+export async function removeMemoryImport(id: string): Promise<SyncReport> {
+  if (!inTauri) {
+    const m = mockMemory();
+    delete m[id];
+    localStorage.setItem(MOCK_MEMORY, JSON.stringify(m));
+    return { available: true, ok: true, message: "" };
+  }
+  return invoke<SyncReport>("memory_import_delete", { id });
+}
+
+export async function syncMemory(): Promise<SyncReport> {
+  if (!inTauri) return { available: true, ok: true, message: "shared.md: 16000 bytes (simulado)" };
+  return invoke<SyncReport>("memory_sync");
+}
+
+// ---------- Títulos automáticos ----------
+
+/** Un título corto para el primer mensaje de un chat. Falla si no hay ninguna IA que lo genere. */
+export async function suggestTitle(text: string, provider: string | null): Promise<string> {
+  if (!inTauri) {
+    await sleep(600);
+    return quickTitle(text).split(" ").slice(0, 3).join(" ") + " (IA)";
+  }
+  return invoke<string>("suggest_title", { text, provider });
+}
+
+/** Título provisional y gratis: las primeras palabras del mensaje, sin formato. */
+export function quickTitle(text: string): string {
+  const clean = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[`*_#>~\[\]()]/g, " ")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0) ?? "";
+  const words = clean.split(/\s+/).filter(Boolean).slice(0, 6);
+  let t = words.join(" ");
+  if (t.length > 40) t = t.slice(0, 40).replace(/\s+\S*$/, "");
+  t = t.replace(/[.,:;!?¡¿\s]+$/, "").replace(/^[¡¿\s]+/, "");
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+}
+
 // ---------- Archivos que entrega una IA ----------
 
 export interface GeneratedFile {

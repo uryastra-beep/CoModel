@@ -15,7 +15,7 @@
   import Markdown from "./Markdown.svelte";
   import ChatImage from "./ChatImage.svelte";
   import ChatFiles from "./ChatFiles.svelte";
-  import { linkedChats } from "./canvas.svelte";
+  import { autoTitle, linkedChats } from "./canvas.svelte";
   import { cardIn, cardOut, ms, popIn, popOut, rise } from "./motion";
   import { fade } from "svelte/transition";
   import PermissionBlock, { type PermissionItem } from "./PermissionBlock.svelte";
@@ -360,6 +360,8 @@
     const files = attached;
     if ((!text && files.length === 0) || busy || canvas.projectSync) return;
     if (files.length === 0 && text.startsWith("/") && (await runCommand(text))) return;
+    // El título se pone antes de crear la carpeta del workspace, para que ya se llame por el tema.
+    if (text) autoTitle(card.id, text, ai.provider);
     try { await ensureChatWorkspace(card.id); }
     catch (e) { canvas.projectError = String(e); return; }
     if (!canvas.cards.some((c) => c.id === card.id) || busy || canvas.projectSync) return;

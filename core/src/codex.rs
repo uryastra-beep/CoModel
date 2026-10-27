@@ -142,6 +142,9 @@ impl Codex {
             a
         };
         // Solo llega un modelo si Codex es la IA elegida en el chat; uno de Claude u OpenRouter nunca vale aquí.
+        if req.ephemeral {
+            a.push("--ephemeral".into());
+        }
         if let Some(m) = req.model.as_deref().filter(|m| !m.starts_with("claude") && !m.contains('/')) {
             a.push("-m".into());
             a.push(m.into());

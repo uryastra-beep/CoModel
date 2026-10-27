@@ -13,4 +13,5 @@ pub mod orchestrator;
 pub mod outputs;
 pub mod projects;
 pub mod provider;
+pub mod titles;
 pub mod sim;
